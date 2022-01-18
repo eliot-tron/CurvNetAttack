@@ -1,5 +1,7 @@
 """Various tools to compute the foliation of
 a simple 1-hidden layered neural network."""
+from ast import Not
+from cmath import log
 import network as net
 import torch
 import matplotlib.pyplot as plt
@@ -63,8 +65,21 @@ class Foliation(object):
         perturbation = v[:, imax]  # be careful, it isn't intuitive -> RTD
         #  print("perturbation = {}".format(perturbation))
         #  print('J^TJ = {}\nWith perturbation = {}'.format(J.T @ J, (J.T @ J).T @ perturbation))
-        perturbation = perturbation / perturbation.norm()
-        if -torch.log(self.network(input_sample + perturbation)) <= -torch.log(self.network(input_sample)):  # Doesn't apply to us because only trained on {0,1}
+        perturbation = perturbation / (5 * perturbation.norm())
+        p = self.network(input_sample)
+        p_attacked = self.network(input_sample + perturbation)
+        y = torch.round(p)
+        y_attacked = torch.round(p_attacked)
+        # TODO: Not sure of the following
+        # if self.task == 'xor':
+        #     y = torch.logical_xor(*torch.round(input_sample)).type(torch.float)
+        #     y_attacked = torch.logical_xor(*torch.round(input_sample + perturbation)).type(torch.float)
+        # elif self.task == 'or':
+        #     y = torch.logical_or(*torch.round(input_sample)).type(torch.float)
+        #     y_attacked = torch.logical_or(*torch.round(input_sample + perturbation)).type(torch.float)
+        # else:
+        #     raise NotImplementedError()
+        if -log_likelihood(y_attacked, p_attacked) <= -log_likelihood(y, p):
             perturbation = -perturbation
         return perturbation, e[imax]
 
@@ -88,12 +103,12 @@ class Foliation(object):
             for x in tqdm(torch.arange(0, 1 + scale, scale)):
                 for y in torch.arange(0, 1 + scale, scale):
                     eigvect, eigval = self.compute_eigenvector(torch.tensor([x,y]))
-                    scaling = torch.sigmoid(0.5 / eigval.norm()).item() * 50
+                    scaling = torch.sigmoid(0.5 / eigval.norm()).item()
                     #  scaling = 50 / (torch.linalg.norm(eigval)).item()
                     #  xs = [x, x + ev[0] * scale]
                     #  ys = [y, y + ev[1] * scale]
-                    plt.quiver(x, y, eigvect[0], eigvect[1], scale=scaling, width=0.003, zorder=2)
-                    plt.quiver(x, y, -eigvect[0], -eigvect[1], scale=scaling, width=0.003, zorder=2)
+                    plt.quiver(x, y, eigvect[0], eigvect[1], width=0.003, zorder=2)
+                    # plt.quiver(x, y, -eigvect[0], -eigvect[1], scale=scaling, width=0.003, zorder=2)
 
         if self.task == "xor":
             plt.plot([0, 1], [0, 1], "ro", zorder=3)
@@ -120,3 +135,8 @@ def sigmoid_prime(x):
     """
     Y = torch.sigmoid(x)
     return torch.diag(Y * (1 - Y))
+
+
+def log_likelihood(y, p):
+    """Returns ln P(y|x)"""
+    return y * torch.log(p) + (1 - y) * torch.log(1 - p)

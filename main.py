@@ -19,9 +19,9 @@ if __name__ == "__main__":
     trainer.train()
     # TODO: Maybe do multiple network for more stable results <13-01-22> #
     with torch.no_grad():
-        #  foliation = foli.Foliation(our_net, objective)
-        #  foliation.plot()
-        OSSA = advatt.OneStepSpectralAttack(our_net, objective)
-        OSSA.plot_fooling_rates(step=0.05)
-        TSSA = advatt.TwoStepSpectralAttack(our_net, objective)
-        TSSA.plot_fooling_rates(step=0.05)
+        foliation = foli.Foliation(our_net, objective)
+        foliation.plot()
+        # OSSA = advatt.OneStepSpectralAttack(our_net, objective)
+        # OSSA.plot_fooling_rates(step=0.05)
+        # TSSA = advatt.TwoStepSpectralAttack(our_net, objective)
+        # TSSA.plot_fooling_rates(step=0.05)
