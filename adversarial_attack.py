@@ -118,6 +118,52 @@ class TwoStepSpectralAttack(AdversarialAttack):
         
         G_inv = G.inverse()
         R_v = NotImplemented  # torch.zeros_like(G)  # = R_iklj v^k v^l in normal coordinates
+        P = v_1
+        B = torch.eye(*R_v.shape) + R_v / 3.
+        e_2, v_2 = torch.eig(G_inv @ B, eigenvectors=True)
+        imax = torch.argmax(e_2, dim=0)[0]
+        second_step = v_2[:, imax]
+        second_step = (budget - first_step_size) * second_step / second_step.norm()
+
+        if (first_step.T @ G @ second_step) < 0:
+            second_step = -second_step
+
+        return P.T @ (input_sample + first_step + second_step)
+
+
+class TwoStepSpectralGeodesicAttack(AdversarialAttack):
+    """Class to compute the two-step spectral attack and analyse it."""
+
+    def compute_attack(self, input_sample, budget):
+        """Compute the attack on a point [input_sample]
+        with a euclidean size given by [budget].
+
+        :input_sample: torch tensor (2)
+        :budget: positive real number
+        :returns: attacked point as a torch tensor (2)
+
+        """
+        first_step_size = budget/2  # TODO: fix this: should be in args or in init #
+
+        assert 0 <= first_step_size <= budget
+
+        W_1 = self.network.hid_layer.weight
+        b_1 = self.network.hid_layer.bias
+        W_2 = self.network.out_layer.weight
+        b_2 = self.network.out_layer.bias
+        Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
+        J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
+        G = J.T @ J  # not really G, missing a > 0 factor
+        e_1, v_1 = torch.eig(G, eigenvectors=True)  # value, vector
+        imax = torch.argmax(e_1, dim=0)[0]
+        first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
+        first_step = first_step_size * first_step / first_step.norm()
+        if -torch.log(self.network(input_sample + first_step)) <= -torch.log(self.network(input_sample)):  # Doesn't work
+            first_step = -first_step
+        first_step = first_step / sqrt(e_1)  # Switching to normal coordinates
+        
+        G_inv = G.inverse()
+        R_v = NotImplemented  # torch.zeros_like(G)  # = R_iklj v^k v^l in normal coordinates
         B = torch.eye(*R_v.shape) + R_v / 3.
         e_2, v_2 = torch.eig(G_inv @ B, eigenvectors=True)
         imax = torch.argmax(e_2, dim=0)[0]
