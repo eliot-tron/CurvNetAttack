@@ -97,6 +97,12 @@ class XorNet(nn.Module):
 
         return x.squeeze()
 
+    def log_likelihood(self, x):
+        """Returns ln P(y|x)"""
+        p = self.forward(x)
+        y = torch.round(p)
+        return y * torch.log(p) + (1 - y) * torch.log(1 - p)
+
 
 class Trainer:
     """A simple trainer to train a simple network."""

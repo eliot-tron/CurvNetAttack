@@ -1,8 +1,5 @@
 """Module implementing our 2 step attack."""
-from cmath import sqrt
-from re import A
 from scipy.integrate import odeint
-from mimetypes import init
 import matplotlib.pyplot as plt
 import network as net
 import torch
@@ -14,7 +11,7 @@ class AdversarialAttack(object):
     and to analyse its performances."""
 
     def __init__(self, network, task="xor"):
-        """Initialize the attack on the network."""
+        """Initializes the attack on the network."""
         super(AdversarialAttack, self).__init__()
         self.network = network
         self.network.eval()
@@ -25,7 +22,7 @@ class AdversarialAttack(object):
         depending on the task of the network.
 
         :input_point: batched tensor (n, 2)
-        :returns: TODO
+        :returns: 0 or 1
 
         """
 
@@ -40,7 +37,7 @@ class AdversarialAttack(object):
 
         return true_label
 
-    def compute_attack(self, init_point, budget):
+    def compute_attack(self, init_point, budget, *args, **kwargs):
         """Computes the attack on point init_point with
         an euclidean budget.
 
@@ -53,7 +50,7 @@ class AdversarialAttack(object):
 
         
     def test_attack(self, budget, test_points):
-        """Compute multiple attacks to check the fooling
+        """Computes multiple attacks to check the fooling
         rate of the attack.
 
         :budget: max euclidean size of an attack
@@ -70,8 +67,26 @@ class AdversarialAttack(object):
 
         return fooling_rate
 
+    def plot_attacks(self, nb_test_points=int(1e2), budget=0.3):
+        """Plots the attack vectors on the input space."""        
+        test_points = torch.rand(nb_test_points, 2)  # maybe change this
+        for coords in tqdm(test_points):
+            attack_vector = self.compute_attack(coords, budget, plot=True) - coords
+            plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2)
+        if self.task == "xor":
+            plt.plot([0, 1], [0, 1], "ro", zorder=3)
+            plt.plot([0, 1], [1, 0], "go", zorder=3)
+        elif self.task == "or":
+            plt.plot([0], [0], "ro", zorder=3)
+            plt.plot([0, 1, 1], [1, 0, 1], "go", zorder=3)
+        plt.xlim([-0.1, 1.1])
+        plt.ylim([-0.1, 1.1])
+        savepath = "./plots/attacks_{}_{}".format(type(self).__name__, self.task)
+        plt.savefig(savepath + '.pdf', format='pdf')
+        plt.show()
+
     def plot_fooling_rates(self, nb_test_points=int(1e3), step=1e-2):
-        """Plot the graph of fooling rates with respect to the budget.
+        """Plots the graph of fooling rates with respect to the budget.
         :returns: TODO
 
         """
@@ -79,16 +94,18 @@ class AdversarialAttack(object):
         test_points = torch.rand(nb_test_points, 2)  # maybe change this
         budget_range = torch.arange(0, 1, step)
         fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
-        plt.plot(budget_range, fooling_rates)
+        plt.plot(budget_range, fooling_rates, label=type(self).__name__)
+        plt.xlabel("Budget")
+        plt.ylabel("Fooling rate")
         savepath = "./plots/fooling_rates_{}_{}".format(type(self).__name__, self.task)
-        plt.savefig(savepath + '.pdf', format='pdf')
-        plt.show()
+        # plt.savefig(savepath + '.pdf', format='pdf')
+        # plt.show()
 
 
 class TwoStepSpectralAttack(AdversarialAttack):
     """Class to compute the two-step spectral attack and analyse it."""
 
-    def compute_attack(self, input_sample, budget):
+    def compute_attack(self, input_sample, budget, plot=False):
         """Compute the attack on a point [input_sample]
         with a euclidean size given by [budget].
 
@@ -97,10 +114,11 @@ class TwoStepSpectralAttack(AdversarialAttack):
         :returns: attacked point as a torch tensor (2)
 
         """
-        first_step_size = budget/2  # TODO: fix this: should be in args or in init #
+        first_step_size = budget * 0.8  # TODO: fix this: should be in args or in init #
 
         assert 0 <= first_step_size <= budget
 
+        """Computing first step's direction."""
         W_1 = self.network.hid_layer.weight
         b_1 = self.network.hid_layer.bias
         W_2 = self.network.out_layer.weight
@@ -112,23 +130,47 @@ class TwoStepSpectralAttack(AdversarialAttack):
         imax = torch.argmax(e_1, dim=0)[0]
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
         first_step = first_step_size * first_step / first_step.norm()
-        if -torch.log(self.network(input_sample + first_step)) <= -torch.log(self.network(input_sample)):  # Doesn't work
-            first_step = -first_step
-        first_step = first_step / sqrt(e_1)  # Switching to normal coordinates
-        
-        G_inv = G.inverse()
-        R_v = NotImplemented  # torch.zeros_like(G)  # = R_iklj v^k v^l in normal coordinates
-        P = v_1
-        B = torch.eye(*R_v.shape) + R_v / 3.
-        e_2, v_2 = torch.eig(G_inv @ B, eigenvectors=True)
-        imax = torch.argmax(e_2, dim=0)[0]
-        second_step = v_2[:, imax]
-        second_step = (budget - first_step_size) * second_step / second_step.norm()
 
-        if (first_step.T @ G @ second_step) < 0:
+        """Computing first step's sign."""
+        if -self.network.log_likelihood(input_sample + first_step) <= -self.network.log_likelihood(input_sample):
+            first_step = -first_step
+        # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
+
+        P_inv = v_1  # @ torch.diag(1 / e_1[:,0]).sqrt() TODO: que faire ?
+        P = P_inv.inverse()
+
+        """ Switching to normal coordinates."""
+        first_step = P @ first_step  # / torch.sqrt(e_1[imax, 0])
+
+        if plot:
+            plt.quiver(input_sample[0], input_sample[1], (P_inv @ first_step)[0], (P_inv @ first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
+
+        """Computing second step's direction."""
+        G_inv = G.inverse()
+        C = 3
+        R_v = C * (first_step.norm().pow(2) * torch.eye(len(first_step)) - torch.einsum("i,j-> ij", first_step, first_step) )  # = R_iklj v^k v^l in normal coordinates
+ 
+        # TODO: not really torch.eye bc G is degenerate
+        B = torch.eye(*R_v.shape) + R_v / 3.
+        B_inv = B.inverse()
+        e_2, v_2 = torch.eig(B, eigenvectors=True)
+        imax = torch.argmax(e_2, dim=0)[0] # TODO what if equality ?
+        second_step = v_2[:, imax]
+        # print(e_2[:,0], imax, v_2)
+        # print(R_v)
+        second_step = (budget - first_step_size) * second_step / (P_inv @ second_step).norm()
+
+        # print(first_step.T @ second_step)
+        """Computing second step's sign."""
+        if (first_step.T @ second_step) < 0:
             second_step = -second_step
 
-        return P.T @ (input_sample + first_step + second_step)
+        if plot:
+            plt.quiver(input_sample[0] + (P_inv @ first_step)[0], input_sample[1] + (P_inv @ first_step)[1], (P_inv @ second_step)[0], (P_inv @ second_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="purple")
+
+
+
+        return input_sample + P_inv @ (first_step + second_step)
 
 
 class TwoStepSpectralGeodesicAttack(AdversarialAttack):
@@ -158,9 +200,11 @@ class TwoStepSpectralGeodesicAttack(AdversarialAttack):
         imax = torch.argmax(e_1, dim=0)[0]
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
         first_step = first_step_size * first_step / first_step.norm()
-        if -torch.log(self.network(input_sample + first_step)) <= -torch.log(self.network(input_sample)):  # Doesn't work
+
+        """Computing first step's sign."""
+        if -self.network.log_likelihood(input_sample + first_step) <= -self.network.log_likelihood(input_sample):
             first_step = -first_step
-        first_step = first_step / sqrt(e_1)  # Switching to normal coordinates
+        first_step = first_step / torch.sqrt(e_1[:, 0])  # Switching to normal coordinates
         
         G_inv = G.inverse()
         R_v = NotImplemented  # torch.zeros_like(G)  # = R_iklj v^k v^l in normal coordinates
@@ -194,7 +238,7 @@ class TwoStepSpectralGeodesicAttack(AdversarialAttack):
 class OneStepSpectralAttack(AdversarialAttack):
     """One step spectral attack designed by Zhao et al."""
     
-    def compute_attack(self, input_sample, budget):
+    def compute_attack(self, input_sample, budget, *args, **kwargs):
         """Compute the attack on a point [input_sample]
         with a euclidean size given by [budget].
 
@@ -213,8 +257,8 @@ class OneStepSpectralAttack(AdversarialAttack):
         imax = torch.argmax(e, dim=0)[0]
         perturbation = v[:, imax]  # be careful, it isn't intuitive -> RTD
         perturbation = budget * perturbation / perturbation.norm()
-        # Following if doesn't apply to us because only trained on {0,1}
-        if -torch.log(self.network(input_sample + perturbation)) <= -torch.log(self.network(input_sample)):
+        """Computing first step's sign."""
+        if -self.network.log_likelihood(input_sample + perturbation) <= -self.network.log_likelihood(input_sample):
             perturbation = -perturbation
         return input_sample + perturbation
 
