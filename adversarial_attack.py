@@ -68,9 +68,13 @@ class AdversarialAttack(object):
 
         return fooling_rate
 
+    def test_points(self, nb_points, size=1):
+        """Generate test points uniformly in the square [0.5-size, 0.5+size]^2."""
+        return (torch.rand(nb_points, 2) - 0.5)* size + 0.5
+
     def plot_attacks(self, nb_test_points=int(1e2), budget=0.3):
         """Plots the attack vectors on the input space."""        
-        test_points = torch.rand(nb_test_points, 2)  # maybe change this
+        test_points = self.test_points(nb_test_points)  # maybe change this
         for coords in tqdm(test_points):
             attack_vector = self.compute_attack(coords, budget, plot=True) - coords
             plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2)
@@ -86,13 +90,13 @@ class AdversarialAttack(object):
         plt.savefig(savepath + '.pdf', format='pdf')
         plt.show()
 
-    def plot_fooling_rates(self, nb_test_points=int(1e3), step=1e-2):
+    def plot_fooling_rates(self, nb_test_points=int(1e3), step=1e-2, size=1):
         """Plots the graph of fooling rates with respect to the budget.
         :returns: TODO
 
         """
         
-        test_points = torch.rand(nb_test_points, 2)  # maybe change this
+        test_points = self.test_points(nb_test_points, size)  # maybe change this
         budget_range = torch.arange(0, 1, step)
         fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
         plt.plot(budget_range, fooling_rates, label=type(self).__name__)
@@ -116,7 +120,7 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         :returns: attacked point as a torch tensor (2)
 
         """
-        first_step_size = budget * 0.5  # TODO: fix this: should be in args or in init #
+        first_step_size = budget * 0.8  # TODO: fix this: should be in args or in init #
 
         assert 0 <= first_step_size <= budget
 
