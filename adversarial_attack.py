@@ -1,4 +1,5 @@
 """Module implementing our 2 step attack."""
+from re import A
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 import network as net
@@ -100,6 +101,70 @@ class AdversarialAttack(object):
         savepath = "./plots/fooling_rates_{}_{}".format(type(self).__name__, self.task)
         # plt.savefig(savepath + '.pdf', format='pdf')
         # plt.show()
+
+
+class StandardTwoStepSpectralAttack(AdversarialAttack):
+    """Class to compute the two-step spectral attack in
+    standard coordinates, and analyse it."""
+
+    def compute_attack(self, input_sample, budget, plot=False):
+        """Compute the attack on a point [input_sample]
+        with a euclidean size given by [budget].
+
+        :input_sample: torch tensor (2)
+        :budget: positive real number
+        :returns: attacked point as a torch tensor (2)
+
+        """
+        first_step_size = budget * 0.5  # TODO: fix this: should be in args or in init #
+
+        assert 0 <= first_step_size <= budget
+
+        """Computing first step's direction."""
+        W_1 = self.network.hid_layer.weight
+        b_1 = self.network.hid_layer.bias
+        W_2 = self.network.out_layer.weight
+        b_2 = self.network.out_layer.bias
+        Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
+        J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
+        G = J.T @ J  # not really G, missing a > 0 factor
+        e_1, v_1 = torch.eig(G, eigenvectors=True)  # value, vector
+        imax = torch.argmax(e_1, dim=0)[0]
+        first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
+        first_step = first_step_size * first_step / first_step.norm()
+
+        """Computing first step's sign."""
+        if -self.network.log_likelihood(input_sample + first_step) <= -self.network.log_likelihood(input_sample):
+            first_step = -first_step
+        # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
+
+        if plot:
+            plt.quiver(input_sample[0], input_sample[1], (first_step)[0], (first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
+
+        """Computing second step's direction."""
+        W_1 = self.network.hid_layer.weight
+        b_1 = self.network.hid_layer.bias
+        W_2 = self.network.out_layer.weight
+        b_2 = self.network.out_layer.bias
+        Sigma = sigmoid_prime((W_1 @ (input_sample + first_step)).squeeze() + b_1)
+        J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
+        G = J.T @ J
+        e_2, v_2 = torch.eig(G, eigenvectors=True)
+        imax = torch.argmax(e_2, dim=0)[0]
+        second_step = v_2[:, imax]
+        second_step = (budget - first_step_size) * second_step / (second_step).norm()
+
+        # print(first_step.T @ second_step)
+        """Computing second step's sign."""
+        if (first_step.T @ second_step) < 0:
+            second_step = -second_step
+
+        if plot:
+            plt.quiver(input_sample[0] + (first_step)[0], input_sample[1] + (first_step)[1], (second_step)[0], (second_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="purple")
+
+
+
+        return input_sample + (first_step + second_step)
 
 
 class TwoStepSpectralAttack(AdversarialAttack):
