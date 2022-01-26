@@ -1,5 +1,4 @@
 """Module implementing our 2 step attack."""
-from re import A
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 import network as net
@@ -132,8 +131,8 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
         J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
         G = J.T @ J  # not really G, missing a > 0 factor
-        e_1, v_1 = torch.eig(G, eigenvectors=True)  # value, vector
-        imax = torch.argmax(e_1, dim=0)[0]
+        e_1, v_1 = torch.symeig(G, eigenvectors=True)  # value, vector
+        imax = torch.argmax(e_1)
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
         first_step = first_step_size * first_step / first_step.norm()
 
@@ -146,15 +145,11 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
             plt.quiver(input_sample[0], input_sample[1], (first_step)[0], (first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
 
         """Computing second step's direction."""
-        W_1 = self.network.hid_layer.weight
-        b_1 = self.network.hid_layer.bias
-        W_2 = self.network.out_layer.weight
-        b_2 = self.network.out_layer.bias
         Sigma = sigmoid_prime((W_1 @ (input_sample + first_step)).squeeze() + b_1)
         J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
         G = J.T @ J
-        e_2, v_2 = torch.eig(G, eigenvectors=True)
-        imax = torch.argmax(e_2, dim=0)[0]
+        e_2, v_2 = torch.symeig(G, eigenvectors=True)
+        imax = torch.argmax(e_2)
         second_step = v_2[:, imax]
         second_step = (budget - first_step_size) * second_step / (second_step).norm()
 
@@ -192,11 +187,14 @@ class TwoStepSpectralAttack(AdversarialAttack):
         b_1 = self.network.hid_layer.bias
         W_2 = self.network.out_layer.weight
         b_2 = self.network.out_layer.bias
-        Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
-        J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
-        G = J.T @ J  # not really G, missing a > 0 factor
-        e_1, v_1 = torch.eig(G, eigenvectors=True)  # value, vector
-        imax = torch.argmax(e_1, dim=0)[0]
+        first_layer = (W_1 @ input_sample).squeeze() + b_1
+        Sigma = sigmoid_prime(first_layer)
+        a = sigmoid_prime((W_2 @ (first_layer)).squeeze() + b_2).squeeze()
+        p = self.network(input_sample)
+        J = a * (W_2 @ Sigma @ W_1)
+        G = J.T @ J / (p * (1-p))
+        e_1, v_1 = torch.symeig(G, eigenvectors=True)  # value, vector
+        imax = torch.argmax(e_1)
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
         first_step = first_step_size * first_step / first_step.norm()
 
@@ -204,30 +202,63 @@ class TwoStepSpectralAttack(AdversarialAttack):
         if -self.network.log_likelihood(input_sample + first_step) <= -self.network.log_likelihood(input_sample):
             first_step = -first_step
         # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
-
-        P_inv = v_1  # @ torch.diag(1 / e_1[:,0]).sqrt() TODO: que faire ?
-        P = P_inv.inverse()
+        thresholded_eig = e_1
+        thresholded_eig[thresholded_eig < 1e-8] = 1.
+        print("\nG={}, thresh={}, e_1={}".format(G, thresholded_eig, e_1))
+        D = torch.diag(thresholded_eig).sqrt()  # TODO: why the fuck est-ce que j'ai des vp négatives?
+        print("\nD={},Dinv={}".format(D, D.inverse()))
+        P_inv = D.inverse() @ v_1  # TODO: que faire ?
+        P = P_inv.inverse() # TODO: optimize 
 
         """ Switching to normal coordinates."""
-        first_step = P @ first_step  # / torch.sqrt(e_1[imax, 0])
-
+        first_step = P @ first_step  # / torch.sqrt(e_1[imax])
+  
         if plot:
             plt.quiver(input_sample[0], input_sample[1], (P_inv @ first_step)[0], (P_inv @ first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
+      
+        """Computing curvature approximation."""
+        normal = first_step / first_step.norm()
+        dx = normal * 1e-5
+        first_layer_dx = (W_1 @ (input_sample + dx)).squeeze() + b_1
+        Sigmadx = sigmoid_prime(first_layer_dx)
+        a = sigmoid_prime((W_2 @ (first_layer_dx)).squeeze() + b_2).squeeze()
+        p = self.network(input_sample)
+        Jdx = a * (W_2 @ Sigmadx @ W_1)
+        Gdx = Jdx.T @ Jdx / (p * (1 - p))
+        print("first step={}, dx = {}, Gdx={}".format(first_step,dx, Gdx))
+        e_dx, v_dx = torch.symeig(Gdx, eigenvectors=True)
+        imax_dx = torch.argmax(e_dx)
+        normal_dx = v_dx[:, imax_dx]
+        
+        thresholded_eig_dx = e_dx
+        thresholded_eig_dx[thresholded_eig_dx < 1e-8] = 1.
+        D_dx = torch.diag(thresholded_eig_dx).sqrt()
+        P_dx_inv = D_dx.inverse() @ v_dx 
+        P_dx = P_inv.inverse() # TODO: optimize
+        normal_dx = P @ normal_dx  # TODO: P or Pdx ?
+        normal_dx = normal_dx / normal_dx.norm()
+        dot = torch.tensor(min(max(-1., torch.dot(normal, normal_dx)), 1.))
+        dtheta = torch.arccos(dot)
+        dR_dx = first_step.norm() * (dtheta / dx.norm()) \
+                * torch.tensor([[-torch.sin(dtheta), -torch.cos(dtheta)],\
+                                [ torch.cos(dtheta), -torch.sin(dtheta)]])
+        second_step = (dR_dx + torch.eye(*dR_dx.shape)) / e_1[imax] @ first_step
+        # TODO: what dafuck when dtheta = 0?
 
         """Computing second step's direction."""
-        G_inv = G.inverse()
-        C = 3
-        R_v = C * (first_step.norm().pow(2) * torch.eye(len(first_step)) - torch.einsum("i,j-> ij", first_step, first_step) )  # = R_iklj v^k v^l in normal coordinates
+        # C = 3
+        # R_v = C * (first_step.norm().pow(2) * torch.eye(len(first_step)) - torch.einsum("i,j-> ij", first_step, first_step) )  # = R_iklj v^k v^l in normal coordinates
  
         # TODO: not really torch.eye bc G is degenerate
-        B = torch.eye(*R_v.shape) + R_v / 3.
-        B_inv = B.inverse()
-        e_2, v_2 = torch.eig(B, eigenvectors=True)
-        imax = torch.argmax(e_2, dim=0)[0] # TODO what if equality ?
-        second_step = v_2[:, imax]
-        # print(e_2[:,0], imax, v_2)
+        # B = torch.eye(*R_v.shape) + R_v / 3.
+        # e_2, v_2 = torch.symeig(B, eigenvectors=True)
+        # imax = torch.argmax(e_2) # TODO what if equality ?
+        # second_step = v_2[:, imax]
+        # print(e_2, imax, v_2)
         # print(R_v)
+
         second_step = (budget - first_step_size) * second_step / (P_inv @ second_step).norm()
+        print("\ndtheta={}, dx={}, dR_dx={}, 2nd_step={}".format(dtheta, dx, dR_dx, second_step))
 
         # print(first_step.T @ second_step)
         """Computing second step's sign."""
@@ -265,8 +296,8 @@ class TwoStepSpectralGeodesicAttack(AdversarialAttack):
         Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
         J = (W_2 @ Sigma @ W_1)  # not really J, missing a > 0 factor
         G = J.T @ J  # not really G, missing a > 0 factor
-        e_1, v_1 = torch.eig(G, eigenvectors=True)  # value, vector
-        imax = torch.argmax(e_1, dim=0)[0]
+        e_1, v_1 = torch.symeig(G, eigenvectors=True)  # value, vector
+        imax = torch.argmax(e_1)
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
         first_step = first_step_size * first_step / first_step.norm()
 
@@ -278,8 +309,8 @@ class TwoStepSpectralGeodesicAttack(AdversarialAttack):
         G_inv = G.inverse()
         R_v = NotImplemented  # torch.zeros_like(G)  # = R_iklj v^k v^l in normal coordinates
         B = torch.eye(*R_v.shape) + R_v / 3.
-        e_2, v_2 = torch.eig(G_inv @ B, eigenvectors=True)
-        imax = torch.argmax(e_2, dim=0)[0]
+        e_2, v_2 = torch.symeig(G_inv @ B, eigenvectors=True)
+        imax = torch.argmax(e_2)
         second_step = v_2[:, imax]
         second_step = (budget - first_step_size) * second_step / second_step.norm()
 
@@ -322,8 +353,8 @@ class OneStepSpectralAttack(AdversarialAttack):
         W_2 = self.network.out_layer.weight
         Sigma = sigmoid_prime((W_1 @ input_sample).squeeze() + b_1)
         J = (W_2 @ Sigma @ W_1)
-        e, v = torch.eig(J.T @ J, eigenvectors=True)
-        imax = torch.argmax(e, dim=0)[0]
+        e, v = torch.symeig(J.T @ J, eigenvectors=True)
+        imax = torch.argmax(e)  # With symeig, always =-1
         perturbation = v[:, imax]  # be careful, it isn't intuitive -> RTD
         perturbation = budget * perturbation / perturbation.norm()
         """Computing first step's sign."""
