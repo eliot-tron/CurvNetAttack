@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 # dataset generator
@@ -20,19 +21,20 @@ class XorDataset(data.Dataset):
         data.Dataset.__init__(self)
         self.nsample = nsample
         self.test = test
-        if test:
-            self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
-                                           dtype=torch.float)
-            self.nsample = 4
-        else:
-            self.input_vars = torch.bernoulli(
-                torch.ones((self.nsample, 2)) * 0.5)
+        self.input_vars = torch.rand(self.nsample, 2)
+        # if test:
+        #     self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
+        #                                    dtype=torch.float)
+        #     self.nsample = 4
+        # else:
+        #     self.input_vars = torch.bernoulli(
+        #         torch.ones((self.nsample, 2)) * 0.5)
 
     def __getitem__(self, index):
         """Get a data point."""
         assert index < self.nsample, "The index must be less than the number of samples."
         inp = self.input_vars[index]
-        return inp, torch.logical_xor(*inp).type(torch.float)
+        return inp, torch.logical_xor(*torch.round(inp)).type(torch.float)
 
     def __len__(self):
         """Return len of the dataset."""
@@ -50,19 +52,20 @@ class OrDataset(data.Dataset):
         data.Dataset.__init__(self)
         self.nsample = nsample
         self.test = test
-        if test:
-            self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
-                                           dtype=torch.float)
-            self.nsample = 4
-        else:
-            self.input_vars = torch.bernoulli(
-                torch.ones((self.nsample, 2)) * 0.5)
+        self.input_vars = torch.rand(self.nsample, 2)
+        # if test:
+        #     self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
+        #                                    dtype=torch.float)
+        #     self.nsample = 4
+        # else:
+        #     self.input_vars = torch.bernoulli(
+        #         torch.ones((self.nsample, 2)) * 0.5)
 
     def __getitem__(self, index):
         """Get a data point."""
         assert index < self.nsample, "The index must be less than the number of samples."
         inp = self.input_vars[index]
-        return inp, torch.logical_or(*inp).type(torch.float)
+        return inp, torch.logical_or(*torch.round(inp)).type(torch.float)
 
     def __len__(self):
         """Return len of the dataset."""
@@ -218,6 +221,7 @@ class Trainer:
             for inp, predicted, expected in zip(inputs, outputs, labels):
                 # print(p, l, abs(p-l))
                 #  predicted = torch.bernoulli(predicted)
+                # plt.plot(inp[0], inp[1], "{}o".format("g" if predicted > 0.5 else "r"))
                 if abs(predicted - expected) < 0.5:
                     ngoodclassif += 1
                     pred_correct[inp] = True
@@ -227,6 +231,10 @@ class Trainer:
 
         ratio = ngoodclassif / ntest
         print('Good classification ratio: %.2f %%' % (ratio * 100))
-        print(pred_correct)
+        # print(pred_correct)
+
+        # plt.xlim([-0.1, 1.1])
+        # plt.ylim([-0.1, 1.1])
+        # plt.show()
 
         return ratio
