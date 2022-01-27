@@ -21,14 +21,14 @@ class XorDataset(data.Dataset):
         data.Dataset.__init__(self)
         self.nsample = nsample
         self.test = test
-        self.input_vars = torch.rand(self.nsample, 2)
-        # if test:
-        #     self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
-        #                                    dtype=torch.float)
-        #     self.nsample = 4
-        # else:
-        #     self.input_vars = torch.bernoulli(
-        #         torch.ones((self.nsample, 2)) * 0.5)
+        # self.input_vars = torch.rand(self.nsample, 2)
+        if test:
+            self.input_vars = torch.tensor([[1, 1], [1, 0], [0, 1], [0, 0]],
+                                           dtype=torch.float)
+            self.nsample = 4
+        else:
+            self.input_vars = torch.bernoulli(
+                torch.ones((self.nsample, 2)) * 0.5)
 
     def __getitem__(self, index):
         """Get a data point."""

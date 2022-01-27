@@ -158,6 +158,9 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         if (first_step.T @ second_step) < 0:
             second_step = -second_step
 
+        optimal_ratio = ((second_step - first_step).T @ G @ second_step) / ((second_step + first_step).T @ G @ (second_step + first_step))
+        # TODO: needs true G for optimal ratio
+
         if plot:
             plt.quiver(input_sample[0] + (first_step)[0], input_sample[1] + (first_step)[1], (second_step)[0], (second_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="purple")
 
@@ -191,8 +194,9 @@ class TwoStepSpectralAttack(AdversarialAttack):
         Sigma = sigmoid_prime(first_layer)
         a = sigmoid_prime((W_2 @ (first_layer)).squeeze() + b_2).squeeze()
         p = self.network(input_sample)
+        # print(a, p)
         J = a * (W_2 @ Sigma @ W_1)
-        G = J.T @ J / (p * (1-p))
+        G = J.T @ J / (p * (1 - p))
         e_1, v_1 = torch.symeig(G, eigenvectors=True)  # value, vector
         imax = torch.argmax(e_1)
         first_step = v_1[:, imax]  # be careful, it isn't intuitive -> RTD
@@ -202,75 +206,55 @@ class TwoStepSpectralAttack(AdversarialAttack):
         if -self.network.log_likelihood(input_sample + first_step) <= -self.network.log_likelihood(input_sample):
             first_step = -first_step
         # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
-        thresholded_eig = e_1
-        thresholded_eig[thresholded_eig < 1e-8] = 1.
-        print("\nG={}, thresh={}, e_1={}".format(G, thresholded_eig, e_1))
-        D = torch.diag(thresholded_eig).sqrt()  # TODO: why the fuck est-ce que j'ai des vp négatives?
-        print("\nD={},Dinv={}".format(D, D.inverse()))
-        P_inv = D.inverse() @ v_1  # TODO: que faire ?
-        P = P_inv.inverse() # TODO: optimize 
-
-        """ Switching to normal coordinates."""
-        first_step = P @ first_step  # / torch.sqrt(e_1[imax])
   
         if plot:
-            plt.quiver(input_sample[0], input_sample[1], (P_inv @ first_step)[0], (P_inv @ first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
+            plt.quiver(input_sample[0], input_sample[1], first_step[0], first_step[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
       
         """Computing curvature approximation."""
-        normal = first_step / first_step.norm()
-        dx = normal * 1e-5
+        normal = first_step / (first_step.T @ G @ first_step).sqrt()
+        dx = 1e-5 * first_step / first_step.norm()
         first_layer_dx = (W_1 @ (input_sample + dx)).squeeze() + b_1
         Sigmadx = sigmoid_prime(first_layer_dx)
-        a = sigmoid_prime((W_2 @ (first_layer_dx)).squeeze() + b_2).squeeze()
-        p = self.network(input_sample)
-        Jdx = a * (W_2 @ Sigmadx @ W_1)
-        Gdx = Jdx.T @ Jdx / (p * (1 - p))
-        print("first step={}, dx = {}, Gdx={}".format(first_step,dx, Gdx))
+        adx = sigmoid_prime((W_2 @ (first_layer_dx)).squeeze() + b_2).squeeze()
+        pdx = self.network(input_sample + dx)
+        Jdx = adx * (W_2 @ Sigmadx @ W_1)
+        Gdx = Jdx.T @ Jdx / (pdx * (1 - pdx))
+        # print("first step={}, dx = {}, Gdx={}".format(first_step,dx, Gdx))
         e_dx, v_dx = torch.symeig(Gdx, eigenvectors=True)
+        # print(e_1, e_dx)
         imax_dx = torch.argmax(e_dx)
+        # print("Eigenvectors:", v_1[:, imax], v_dx[:, imax_dx])
         normal_dx = v_dx[:, imax_dx]
         
-        thresholded_eig_dx = e_dx
-        thresholded_eig_dx[thresholded_eig_dx < 1e-8] = 1.
-        D_dx = torch.diag(thresholded_eig_dx).sqrt()
-        P_dx_inv = D_dx.inverse() @ v_dx 
-        P_dx = P_inv.inverse() # TODO: optimize
-        normal_dx = P @ normal_dx  # TODO: P or Pdx ?
-        normal_dx = normal_dx / normal_dx.norm()
-        dot = torch.tensor(min(max(-1., torch.dot(normal, normal_dx)), 1.))
+        normal_dx = normal_dx / (normal_dx.T @ G @ normal_dx).sqrt()
+        dot = normal.T @ G @ normal_dx
+        if dot < 0:  # Flip the normal if not in the right direction
+            normal_dx = -normal_dx
+            dot = -dot
+        dot = torch.tensor(min(dot, 1.))  # Clip the dot product because of approximation (or a pb earlier)
         dtheta = torch.arccos(dot)
-        dR_dx = first_step.norm() * (dtheta / dx.norm()) \
+        # Speed rotation matrix
+        dR_dx = first_step_size * (dtheta / dx.norm()) \
                 * torch.tensor([[-torch.sin(dtheta), -torch.cos(dtheta)],\
                                 [ torch.cos(dtheta), -torch.sin(dtheta)]])
-        second_step = (dR_dx + torch.eye(*dR_dx.shape)) / e_1[imax] @ first_step
-        # TODO: what dafuck when dtheta = 0?
 
-        """Computing second step's direction."""
-        # C = 3
-        # R_v = C * (first_step.norm().pow(2) * torch.eye(len(first_step)) - torch.einsum("i,j-> ij", first_step, first_step) )  # = R_iklj v^k v^l in normal coordinates
- 
-        # TODO: not really torch.eye bc G is degenerate
-        # B = torch.eye(*R_v.shape) + R_v / 3.
-        # e_2, v_2 = torch.symeig(B, eigenvectors=True)
-        # imax = torch.argmax(e_2) # TODO what if equality ?
-        # second_step = v_2[:, imax]
-        # print(e_2, imax, v_2)
-        # print(R_v)
+        """Computing second step's direction and size."""
+        second_step = ((dR_dx / e_1[imax]) + torch.eye(*dR_dx.shape)) @ first_step
+        second_step = (budget - first_step_size) * second_step / second_step.norm()
+        # print("\ndtheta={}, dx={}, dR_dx={}, 1st_step={}, 2nd_step={}, dot={}".format(dtheta, dx, dR_dx, first_step, second_step, dot))
 
-        second_step = (budget - first_step_size) * second_step / (P_inv @ second_step).norm()
-        print("\ndtheta={}, dx={}, dR_dx={}, 2nd_step={}".format(dtheta, dx, dR_dx, second_step))
-
+        # print("\n Gdx - G={}".format((Gdx - G).abs()))
         # print(first_step.T @ second_step)
         """Computing second step's sign."""
-        if (first_step.T @ second_step) < 0:
+        if (first_step.T @ G @ second_step) < 0:
             second_step = -second_step
 
         if plot:
-            plt.quiver(input_sample[0] + (P_inv @ first_step)[0], input_sample[1] + (P_inv @ first_step)[1], (P_inv @ second_step)[0], (P_inv @ second_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="purple")
+            plt.quiver(input_sample[0] + first_step[0], input_sample[1] + first_step[1], second_step[0], second_step[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="purple")
 
 
 
-        return input_sample + P_inv @ (first_step + second_step)
+        return input_sample + (first_step + second_step)
 
 
 class TwoStepSpectralGeodesicAttack(AdversarialAttack):
