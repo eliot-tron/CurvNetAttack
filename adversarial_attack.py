@@ -211,8 +211,8 @@ class TwoStepSpectralAttack(AdversarialAttack):
             plt.quiver(input_sample[0], input_sample[1], first_step[0], first_step[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
       
         """Computing curvature approximation."""
-        normal = first_step / (first_step.T @ G @ first_step).sqrt()
-        dx = 1e-5 * first_step / first_step.norm()
+        normal = first_step / first_step.norm()
+        dx = 1e-5 * normal
         first_layer_dx = (W_1 @ (input_sample + dx)).squeeze() + b_1
         Sigmadx = sigmoid_prime(first_layer_dx)
         adx = sigmoid_prime((W_2 @ (first_layer_dx)).squeeze() + b_2).squeeze()
@@ -226,20 +226,27 @@ class TwoStepSpectralAttack(AdversarialAttack):
         # print("Eigenvectors:", v_1[:, imax], v_dx[:, imax_dx])
         normal_dx = v_dx[:, imax_dx]
         
-        normal_dx = normal_dx / (normal_dx.T @ G @ normal_dx).sqrt()
+        normal_dx = normal_dx / normal_dx.norm()
         dot = normal.T @ G @ normal_dx
         if dot < 0:  # Flip the normal if not in the right direction
             normal_dx = -normal_dx
             dot = -dot
-        dot = torch.tensor(min(dot, 1.))  # Clip the dot product because of approximation (or a pb earlier)
-        dtheta = torch.arccos(dot)
+        cross = normal[0]*normal_dx[1] - normal[1]*normal_dx[0]
+        dtheta = torch.asin(cross)
+        # dot = torch.tensor(min(dot, 1.))  # Clip the dot product because of approximation (or a pb earlier)
+        # dtheta = torch.arccos(dot)
         # Speed rotation matrix
-        dR_dx = first_step_size * (dtheta / dx.norm()) \
-                * torch.tensor([[-torch.sin(dtheta), -torch.cos(dtheta)],\
-                                [ torch.cos(dtheta), -torch.sin(dtheta)]])
+        dx_theta = first_step_size * dtheta / dx.norm()
+        # print(dx_theta)
+        #dR_dx = first_step_size * (dtheta / dx.norm()) \
+        #        * torch.tensor([[-torch.sin(dtheta), -torch.cos(dtheta)],\
+        #                        [ torch.cos(dtheta), -torch.sin(dtheta)]])
+        dR_dx =  torch.tensor([[torch.cos(dx_theta), -torch.sin(dx_theta)],\
+                                [ torch.sin(dx_theta), torch.cos(dx_theta)]])
 
         """Computing second step's direction and size."""
-        second_step = ((dR_dx / e_1[imax]) + torch.eye(*dR_dx.shape)) @ first_step
+        # second_step = ((dR_dx / e_1[imax]) + torch.eye(*dR_dx.shape)) @ first_step
+        second_step = dR_dx @ first_step
         second_step = (budget - first_step_size) * second_step / second_step.norm()
         # print("\ndtheta={}, dx={}, dR_dx={}, 1st_step={}, 2nd_step={}, dot={}".format(dtheta, dx, dR_dx, first_step, second_step, dot))
 
