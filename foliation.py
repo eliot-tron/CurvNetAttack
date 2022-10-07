@@ -16,7 +16,7 @@ class Foliation(object):
         self.task = task
 
 
-    def compute_leaf(self, init_point, num_points=2000, dt=1e-2):
+    def compute_leaf(self, init_point, num_points=4000, dt=1e-3, transverse=False):
         """Compute the leaf going through the point
         [init_point] and with distribution the kernel
         of the FIM induced by the network.
@@ -24,11 +24,15 @@ class Foliation(object):
         :init_point: (x_1(0), x_2(0))
         :num_points: number of points to generate on the curve
         :dt: time interval to solve the PDE system
+        :transverse: If true, compute the transverse foliation
         :returns: the curve (x_1(t), x_2(t)) [num_points, 2]
 
         """
         gamma_list = [torch.tensor(init_point).unsqueeze(-1)]
-        P = torch.tensor([[0., -1.], [1., 0.]])  # remove P if you want the orthogonal leaves
+        if transverse:
+            P = torch.eye(2)
+        else:
+            P = torch.tensor([[0., -1.], [1., 0.]])
         W_1 = self.network.hid_layer.weight
         b_1 = self.network.hid_layer.bias
         W_2 = self.network.out_layer.weight
@@ -83,18 +87,18 @@ class Foliation(object):
             perturbation = -perturbation
         return perturbation, e[imax]
 
-    def plot(self, leaves=True, eigenvectors=True):
+    def plot(self, leaves=True, eigenvectors=True, transverse=False):
         """Plot the leaves on the input space.
 
         :returns: None
 
         """
-        scale = 0.1
+        scale = 0.2
         if leaves:
             print("Plotting the leaves...")
             for x in tqdm(torch.arange(-0.5, 1.5 + scale, scale)):
                 for y in torch.arange(-0.5, 1.5 + scale, scale):
-                    coordinates = self.compute_leaf([x, y])
+                    coordinates = self.compute_leaf([x, y], transverse=transverse)
                     xs = [g[0] for g in coordinates]
                     ys = [g[1] for g in coordinates]
                     plt.plot(xs, ys, "b-", zorder=1)
@@ -121,6 +125,8 @@ class Foliation(object):
         savepath = "./plots/foliation_{}neur_{}".format(self.network.hid_size, self.task)
         if eigenvectors:
             savepath = savepath + '_eigen'
+        if transverse:
+            savepath = savepath + '_trans'
         plt.savefig(savepath + '.pdf', format='pdf')
         plt.show()
 

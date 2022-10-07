@@ -68,7 +68,7 @@ class AdversarialAttack(object):
         return fooling_rate
 
     def test_points(self, nb_points, size=1):
-        """Generate test points uniformly in the square [0.5-size, 0.5+size]^2."""
+        """Generate test points uniformly in the square [0.5-size/2, 0.5+size/2]^2."""
         return (torch.rand(nb_points, 2) - 0.5)* size + 0.5
 
     def plot_attacks(self, nb_test_points=int(1e2), budget=0.3):
@@ -89,14 +89,14 @@ class AdversarialAttack(object):
         plt.savefig(savepath + '.pdf', format='pdf')
         plt.show()
 
-    def plot_fooling_rates(self, nb_test_points=int(1e3), step=1e-2, size=1):
+    def plot_fooling_rates(self, nb_test_points=int(5e3), step=1e-2, size=1, end=1):
         """Plots the graph of fooling rates with respect to the budget.
         :returns: TODO
 
         """
         
         test_points = self.test_points(nb_test_points, size)  # maybe change this
-        budget_range = torch.arange(0, 1, step)
+        budget_range = torch.arange(0, end, step)
         fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
         plt.plot(budget_range, fooling_rates, label=type(self).__name__)
         plt.xlabel("Budget")
