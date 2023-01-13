@@ -1,109 +1,8 @@
 """Module implementing our 2 step attack."""
-import random
-from typing import Tuple, Union
 import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
-from torch import nn
-from torch.autograd.functional import jacobian
-
-class GeometricModel(object):
-    
-    def __init__(self,
-                 network: nn.Module,
-                 network_score: nn.Module,
-                 verbose: bool=False,
-    ) -> None:
-
-        super(GeometricModel, self).__init__()
-        self.network = network
-        self.network_score = network_score
-        # self.network.eval()
-        self.verbose = verbose
-        self.device = next(self.network.parameters()).device
-
-
-    def proba(
-        self,
-        eval_point: torch.Tensor,
-    ) -> None:
-
-        if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
-            eval_point = eval_point.unsqueeze(0)
-        p = torch.exp(self.network(eval_point))
-        if self.verbose: print(f"proba: {p}")
-        return p
-
-    def score(
-        self,
-        eval_point: torch.Tensor,
-    ) -> None:
-        
-        if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
-            eval_point = eval_point.unsqueeze(0)
-        
-        return self.network_score(eval_point)
-
-
-    def grad_proba(
-        self,
-        eval_point: torch.Tensor,
-        wanted_class: int, 
-    ) -> torch.Tensor:
-
-        j = jacobian(self.proba, eval_point).squeeze(0)
-
-        grad_proba = j[wanted_class, :]
-
-        return grad_proba
-
-
-    def jac_proba(
-        self,
-        eval_point: torch.Tensor,
-    ) -> torch.Tensor:
-
-        if self.verbose:
-            print(f"shape of eval_point = {eval_point.shape}")
-            print(f"shape of output = {self.proba(eval_point).shape}")
-        j = jacobian(self.proba, eval_point) # TODO: vérifier dans le cadre non batched
-        if self.verbose: print(f"shape of j before reshape = {j.shape}")
-        j = j.sum(2)
-        j = j.reshape(*(j.shape[:2]), -1)
-        if self.verbose: print(f"shape of j after reshape = {j.shape}")
-
-        return j
-    
-    
-    def jac_score(
-        self,
-        eval_point: torch.Tensor,
-    ) -> torch.Tensor:
-        
-        if self.verbose:
-            print(f"shape of eval_point = {eval_point.shape}")
-            print(f"shape of output = {self.proba(eval_point).shape}")
-        j = jacobian(self.score, eval_point)
-        if self.verbose: print(f"shape of j before reshape = {j.shape}")
-        
-        j = j.sum(2)
-        j = j.reshape(*(j.shape[:2]), -1)
-        if self.verbose: print(f"shape of j after reshape = {j.shape}")
-        
-        return j
-    
-    
-    def local_data_matrix(
-        self,
-        eval_point: torch.Tensor,
-    ) -> torch.Tensor:
-        
-        J_s = self.jac_score(eval_point)
-        p = self.proba(eval_point)
-        P = torch.diag_embed(p, dim1=1)
-        pp = torch.einsum("zi,zj -> zij", p, p)
-        
-        return torch.einsum("zji, zjk, zkl -> zil", J_s, (P - pp), J_s)
+from geometry import GeometricModel
 
 
 class AdversarialAttack(GeometricModel):
@@ -142,11 +41,12 @@ class AdversarialAttack(GeometricModel):
         """Generate test points uniformly in the square [0.5-size/2, 0.5+size/2]^2."""
         return (torch.rand(nb_points, 2) - 0.5)* size + 0.5
 
-    def plot_attacks_2D(self, nb_test_points=int(1e2), budget=0.3):
+    def plot_attacks_2D(self, test_points, budget=0.3):
         """Plots the attack vectors on the input space."""        
-        test_points = self.test_points_2D(nb_test_points)  # maybe change this
-        for coords in tqdm(test_points):
-            attack_vector = self.compute_attack(coords, budget, plot=True) - coords
+        self.task = "xor"
+        attack_vectors = self.compute_attack(test_points, budget) - test_points
+        attack_vectors = attack_vectors.detach()
+        for coords, attack_vector in tqdm(zip(test_points, attack_vectors)):
             plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2)
         if self.task == "xor":
             plt.plot([0, 1], [0, 1], "ro", zorder=3)
@@ -235,8 +135,8 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
 
         # print(first_step.T @ second_step)
         """Computing second step's sign."""
-        second_step_sign = torch.einsum('zukl, zukl -> zu', first_step, second_step).sign()
-        second_step = torch.einsum('zu, zukl -> zukl', second_step_sign, second_step)
+        second_step_sign = torch.einsum('z..., z... -> z', first_step, second_step).sign()
+        second_step = torch.einsum('z, z... -> z...', second_step_sign, second_step)
 
         # optimal_ratio = ((second_step - first_step).T @ G @ second_step) / ((second_step + first_step).T @ G @ (second_step + first_step))
         # TODO: needs true G for optimal ratio

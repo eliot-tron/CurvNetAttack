@@ -12,7 +12,6 @@ from torch import optim
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
-from model_manifold.plot import save_images
 from xor_datasets import XorDataset
 from xor_networks import xor_net
 
@@ -96,7 +95,7 @@ def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Train a basic model on XOR",
-        usage="python3 mnist_training.py [--batch-size BATCH-SIZE "
+        usage="python3 xor_training.py [--batch-size BATCH-SIZE "
         "--epochs EPOCHS --lr LR --seed SEED --output-dir OUTPUT-DIR]",
     )
     parser.add_argument("--batch-size", type=int, default=50, help="Batch size")
@@ -132,6 +131,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"xor_net_{epoch + 1:02d}.pt")
+        torch.save(model.state_dict(), output_dir / f"xor_net_sigmoid_{epoch + 1:02d}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)
