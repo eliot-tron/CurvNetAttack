@@ -20,6 +20,30 @@ class AdversarialAttack(GeometricModel):
         """
         raise NotImplementedError()
 
+    
+    def attack_sign(
+        self,
+        init_point: torch.Tensor,
+        perturbation: torch.Tensor,
+        zero_value: float=1.,
+    ) -> torch.Tensor:
+        """Compute the sign of the attack to decrease the likelihood of the target.
+
+        Args:
+            init_point (torch.Tensor): point on where the attack take place with shape (bs, d)
+
+        Returns:
+            torch.Tensor: Batch tensor of the sign
+        """
+
+        max_likelihood_attacked, max_indices = torch.max(self.proba(init_point + perturbation), dim=1)
+        max_likelihood_origin = self.proba(init_point).gather(1, max_indices.unsqueeze(1)).squeeze(1)
+
+        perturbation_sign = torch.sign(max_likelihood_origin - max_likelihood_attacked)  # TODO: sum, or else ?
+        perturbation_sign[perturbation_sign==0] = zero_value
+        
+        return perturbation_sign
+
         
     def test_attack(self, budget, test_points):
         """Computes multiple attacks to check the fooling
@@ -118,7 +142,7 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         first_step = first_step.reshape(input_sample.shape)
 
         """Computing first step's sign."""
-        first_step_sign = torch.sign(-self.proba(input_sample + first_step).log().sum(1) + self.proba(input_sample).log().sum(1))  # TODO: sum, or else ?
+        first_step_sign = self.attack_sign(input_sample, first_step)
         first_step = torch.einsum('z, z... -> z...', first_step_sign, first_step)
         # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
 
@@ -136,6 +160,7 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         # print(first_step.T @ second_step)
         """Computing second step's sign."""
         second_step_sign = torch.einsum('z..., z... -> z', first_step, second_step).sign()
+        second_step_sign[second_step_sign==0] = 1
         second_step = torch.einsum('z, z... -> z...', second_step_sign, second_step)
 
         # optimal_ratio = ((second_step - first_step).T @ G @ second_step) / ((second_step + first_step).T @ G @ (second_step + first_step))
@@ -163,11 +188,10 @@ class OneStepSpectralAttack(AdversarialAttack):
 
         G = self.local_data_matrix(input_sample)
         e, v = torch.linalg.eigh(G)  # value, vector
-        perturbation = v[:, :, -1]  # be careful, it isn't intuitive -> RTD
+        perturbation = v[..., -1]  # be careful, it isn't intuitive -> RTD
         norm = torch.linalg.vector_norm(perturbation, ord=2, dim=-1, keepdim=True)
         perturbation = budget * perturbation / norm
         perturbation = perturbation.reshape(input_sample.shape)
-        """Computing first step's sign."""
-        perturbation_sign = torch.sign(-self.proba(input_sample + perturbation).log().sum(1) + self.proba(input_sample).log().sum(1))  # TODO: sum, or else ?
+        perturbation_sign = self.attack_sign(input_sample, perturbation)
         perturbation = torch.einsum('z, z... -> z...', perturbation_sign, perturbation)
         return input_sample + perturbation

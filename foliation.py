@@ -26,17 +26,24 @@ class Foliation(GeometricModel):
         """
         def f(t, y):
             J = self.jac_proba(torch.tensor(y).float().unsqueeze(0)).squeeze(0).detach()
-            e = null_space(J) 
-            # print(f'e.shape = {e}\ny.shape = {y}')
-            # if len(e[0])==0: print(J)
-            if len(e[0]) == 0:
-                e = torch.tensor([[0.,0.]]).numpy()
-            return e[:,0]
+            a, b = J[0]
+            e = torch.tensor([b, -a])
+            # e = J[0]
+            e = e / e.norm(2)
+            # e = null_space(J) 
+            # if len(e[0]) == 0:
+            #     print(e, J)
+            #     e = torch.tensor([0.,0.]).numpy()
+            # else:
+            #     e = e[:,0]
+            return e.numpy()
 
-        leaf = solve_ivp(f, t_span=(0, 1), y0=init_point).y
-        # print(f'leaf shape = {leaf.shape}')
-
-        return leaf
+        leaf = solve_ivp(f, t_span=(0, 0.5), y0=init_point, method='RK23').y
+        leaf_back = solve_ivp(f, t_span=(0, -0.5), y0=init_point, method='RK23').y
+        # print(f'leaf shape = {leaf.shape}') 
+        
+        return torch.cat((torch.tensor(leaf_back).flip(1)[:,:-1], torch.tensor(leaf)), dim=1)
+        # return leaf
 
     def plot(self, leaves=True, eigenvectors=True, transverse=False):
         """Plot the leaves on the input space.
@@ -74,5 +81,5 @@ class Foliation(GeometricModel):
             savepath = savepath + '_eigen'
         if transverse:
             savepath = savepath + '_trans'
-        plt.savefig(savepath + '.pdf', format='pdf')
-        plt.show()
+        # plt.savefig(savepath + '.pdf', format='pdf')
+        # plt.show()
