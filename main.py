@@ -13,14 +13,24 @@ from foliation import Foliation
 from torch import nn
 
 if __name__ == "__main__":
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(device)
     dataset_name = ["MNIST", "XOR"][0]
-    num_samples = int(200)
+    num_samples = int(500)
     task = ["", "plot-attack", "plot-attacks-2D", "fooling-rates", "plot-leaves"][3]
+    non_linearity = ['Sigmoid', 'ReLU'][0]
+    MAX_BUDGET = 10
+    STEP_BUDGET = 0.1
 
     if dataset_name == "MNIST":
-        checkpoint_path = './checkpoint/medium_cnn_10.pt'
-        network = medium_cnn(checkpoint_path, non_linearity=nn.Sigmoid())
-        network_score = medium_cnn(checkpoint_path, score=True)
+        if non_linearity == 'Sigmoid':
+            checkpoint_path = './checkpoint/medium_cnn_10_Sigmoid.pt'
+            non_linearity = nn.Sigmoid()
+        elif non_linearity == 'ReLU':
+            checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
+            non_linearity = nn.ReLU()
+        network = medium_cnn(checkpoint_path, non_linearity=non_linearity)
+        network_score = medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
 
         normalize = transforms.Normalize((0.1307,), (0.3081,))
 
@@ -31,15 +41,23 @@ if __name__ == "__main__":
             transform=transforms.Compose([transforms.ToTensor(), normalize]),
         )
     elif dataset_name == "XOR":
-        checkpoint_path = './checkpoint/xor_net_10.pt'
-        # checkpoint_path = './checkpoint/xor_net_sigmoid_22.pt'
-        network = xor_net(checkpoint_path)
-        network_score = xor_net(checkpoint_path, score=True)
+        if non_linearity == 'Sigmoid':
+            checkpoint_path = './checkpoint/xor_net_22_Sigmoid.pt'
+            print("/!\\ "*5 + "\nSigmoid for Xor not working.")
+            non_linearity = nn.Sigmoid()
+        elif non_linearity == 'ReLU':
+            checkpoint_path = './checkpoint/xor_net_30_ReLU.pt'
+            non_linearity = nn.ReLU()
+        network = xor_net(checkpoint_path, non_linearity=non_linearity)
+        network_score = xor_net(checkpoint_path, score=True, non_linearity=non_linearity)
 
         input_space = XorDataset(
             nsample=10000,
             discrete=False,
         )
+
+    network = network.to(device)
+    network_score = network_score.to(device)
 
     STSSA = StandardTwoStepSpectralAttack(
                 network=network,
@@ -65,8 +83,11 @@ if __name__ == "__main__":
             print(f'WARNING: you are trying to get mmore samples ({num_samples}) than the number of data in the test set ({len(input_space)})')
         random_indices = torch.randperm(len(input_space))[:num_samples]
         input_points = torch.stack([input_space[idx][0] for idx in random_indices])
+        input_points = input_points.to(device)
 
     if task == "plot-attack":
+        plt.matshow(input_points[0][0])
+        plt.show()
         two_step_attack = STSSA.compute_attack(input_points, budget=1)
         plt.matshow(input_points[0][0] - two_step_attack.detach().numpy()[0][0])
         plt.show()
@@ -82,9 +103,8 @@ if __name__ == "__main__":
         plt.show()
     
     if task == "fooling-rates":
-        MAX_BUDGET = 10
-        STSSA.save_fooling_rates(input_points, step=0.1, end=MAX_BUDGET)
-        OSSA.save_fooling_rates(input_points, step=0.1, end=MAX_BUDGET)
+        STSSA.save_fooling_rates(input_points, step=STEP_BUDGET, end=MAX_BUDGET)
+        OSSA.save_fooling_rates(input_points, step=STEP_BUDGET, end=MAX_BUDGET)
         plt.legend()
         savedirectory = f"./output/{dataset_name}/"
         if not path.isdir(savedirectory):

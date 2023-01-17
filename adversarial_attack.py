@@ -129,16 +129,16 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         :returns: attacked point as a torch tensor (bs, d)
 
         """
-        first_step_size = budget * 1  # TODO: fix this: should be in args or in init #
+        first_step_size = budget * 0.6  # TODO: fix this: should be in args or in init #
 
         assert 0 <= first_step_size <= budget
 
         """Computing first step's direction."""
-        G = self.local_data_matrix(input_sample)
-        e_1, v_1 = torch.linalg.eigh(G)  # value, vector, in ascending order
+        G_1 = self.local_data_matrix(input_sample)
+        e_1, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
         first_step = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
-        norm = torch.linalg.vector_norm(first_step, ord=2, dim=-1, keepdim=True)
-        first_step = first_step_size * first_step / norm
+        norm_1 = torch.linalg.vector_norm(first_step, ord=2, dim=-1, keepdim=True)
+        first_step = first_step_size * first_step / norm_1
         first_step = first_step.reshape(input_sample.shape)
 
         """Computing first step's sign."""
@@ -150,11 +150,11 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
             plt.quiver(input_sample[0], input_sample[1], (first_step)[0], (first_step)[1], width=0.001, scale_units='xy', angles='xy', scale=1, zorder=3, color="blue")
 
         """Computing second step's direction."""
-        G = self.local_data_matrix(input_sample + first_step)
-        e_2, v_2 = torch.linalg.eigh(G)  # value, vector, in ascending order
+        G_2 = self.local_data_matrix(input_sample + first_step)
+        e_2, v_2 = torch.linalg.eigh(G_2)  # value, vector, in ascending order
         second_step = v_2[..., -1]
-        norm = torch.linalg.vector_norm(second_step, ord=2, dim=-1, keepdim=True)
-        second_step = (budget - first_step_size) * second_step / norm
+        norm_2 = torch.linalg.vector_norm(second_step, ord=2, dim=-1, keepdim=True)
+        second_step = (budget - first_step_size) * second_step / norm_2
         second_step = second_step.reshape(input_sample.shape)
 
         # print(first_step.T @ second_step)
