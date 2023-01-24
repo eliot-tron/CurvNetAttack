@@ -54,9 +54,12 @@ class AdversarialAttack(GeometricModel):
         :returns: fooling rate
         """
         
+        # print("get attacked point")
         attacked_points = self.compute_attack(test_points, budget)
+        # print("get predicted label")
         predicted_labels = self.network(test_points).exp().argmax(dim=1)
         predicted_labels_attacked = self.network(attacked_points).exp().argmax(dim=1)
+        # print('compute fooling rates')
         fooling_rate = (predicted_labels != predicted_labels_attacked).float().mean()
 
         return fooling_rate
@@ -84,22 +87,22 @@ class AdversarialAttack(GeometricModel):
         plt.savefig(savepath + '.pdf', format='pdf')
         plt.show()
 
-    def save_xor_fooling_rates(self, nb_test_points=int(5e3), step=1e-2, size=1, end=1):
-        """Saves the graph of fooling rates with respect to the budget.
-        :returns: None
-        """
+    # def save_xor_fooling_rates(self, nb_test_points=int(5e3), step=1e-2, size=1, end=1):
+    #     """Saves the graph of fooling rates with respect to the budget.
+    #     :returns: None
+    #     """
         
-        test_points = self.test_points_2D(nb_test_points, size)  # maybe change this
-        budget_range = torch.arange(0, end, step)
-        fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
-        plt.plot(budget_range, fooling_rates, label=type(self).__name__)
-        plt.xlabel("Budget")
-        plt.ylabel("Fooling rate")
-        savepath = "./output/fooling_rates_{}".format(type(self).__name__)
-        plt.savefig(savepath + '.pdf', format='pdf')
+    #     test_points = self.test_points_2D(nb_test_points, size)  # maybe change this
+    #     budget_range = torch.arange(0, end, step)
+    #     fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
+    #     plt.plot(budget_range, fooling_rates, label=type(self).__name__)
+    #     plt.xlabel("Budget")
+    #     plt.ylabel("Fooling rate")
+    #     savepath = "./output/fooling_rates_{}".format(type(self).__name__)
+    #     plt.savefig(savepath + '.pdf', format='pdf')
 
 
-    def save_fooling_rates(self, test_points, step=1e-2, end=1):
+    def save_fooling_rates(self, test_points, step=1e-2, end=1, savepath="./output/fooling_rates"):
         """Saves the graph of fooling rates with respect to the budget.
         :test_point: points to compute the fooling rates on.
         :step: step size between two budgets.
@@ -107,12 +110,13 @@ class AdversarialAttack(GeometricModel):
         :returns: None
         """
         
-        budget_range = torch.arange(0, end, step)
-        fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
+        budget_range = torch.arange(0, end, step).cpu()
+        fooling_rates = [self.test_attack(budget, test_points).cpu() for budget in tqdm(budget_range)]
         plt.plot(budget_range, fooling_rates, label=type(self).__name__)
         plt.xlabel("Budget")
         plt.ylabel("Fooling rate")
-        # savepath = "./output/fooling_rates_{}".format(type(self).__name__)
+        savepath = savepath + f"_{type(self).__name__}"
+        torch.save((budget_range, fooling_rates), savepath + '_budget-rates.pt')
         # plt.savefig(savepath + '.pdf', format='pdf')
         # plt.show()
 
@@ -134,14 +138,21 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         assert 0 <= first_step_size <= budget
 
         """Computing first step's direction."""
+        # print("computing first direction")
         G_1 = self.local_data_matrix(input_sample)
-        e_1, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
-        first_step = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
+        # print("computing eigh")
+        if G_1.is_cuda:
+            _, _, v_1 = torch.linalg.svd(G_1)
+            first_step = v_1[..., 0]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
+            first_step = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
         norm_1 = torch.linalg.vector_norm(first_step, ord=2, dim=-1, keepdim=True)
         first_step = first_step_size * first_step / norm_1
         first_step = first_step.reshape(input_sample.shape)
 
         """Computing first step's sign."""
+        # print("compute attack sign")
         first_step_sign = self.attack_sign(input_sample, first_step)
         first_step = torch.einsum('z, z... -> z...', first_step_sign, first_step)
         # TODO: since less budget, we might go in the wrong direction ( close to the frontiers )
@@ -151,8 +162,12 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
 
         """Computing second step's direction."""
         G_2 = self.local_data_matrix(input_sample + first_step)
-        e_2, v_2 = torch.linalg.eigh(G_2)  # value, vector, in ascending order
-        second_step = v_2[..., -1]
+        if G_2.is_cuda:
+            _, _, v_2 = torch.linalg.svd(G_2)
+            second_step = v_2[..., 0]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v_2 = torch.linalg.eigh(G_2)  # value, vector, in ascending order
+            second_step = v_2[..., -1]  # be careful, it isn't intuitive -> RTD
         norm_2 = torch.linalg.vector_norm(second_step, ord=2, dim=-1, keepdim=True)
         second_step = (budget - first_step_size) * second_step / norm_2
         second_step = second_step.reshape(input_sample.shape)
@@ -187,8 +202,12 @@ class OneStepSpectralAttack(AdversarialAttack):
         """
 
         G = self.local_data_matrix(input_sample)
-        e, v = torch.linalg.eigh(G)  # value, vector
-        perturbation = v[..., -1]  # be careful, it isn't intuitive -> RTD
+        if G.is_cuda:
+            _, _, v = torch.linalg.svd(G)
+            perturbation = v[..., 0]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v = torch.linalg.eigh(G)  # value, vector, in ascending order
+            perturbation = v[..., -1]  # be careful, it isn't intuitive -> RTD
         norm = torch.linalg.vector_norm(perturbation, ord=2, dim=-1, keepdim=True)
         perturbation = budget * perturbation / norm
         perturbation = perturbation.reshape(input_sample.shape)
