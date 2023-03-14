@@ -101,6 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=50, help="Batch size")
     parser.add_argument("--epochs", type=int, default=30, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate")
+    parser.add_argument("--activation", type=str, default="sigmoid", help="Activation function [sigmoid|relu]")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--output-dir",
@@ -118,7 +119,11 @@ if __name__ == "__main__":
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = xor_net()  
+    if args.activation.lower() == "sigmoid":
+        non_linearity = nn.Sigmoid()
+    elif args.activation.lower() == "relu":
+        non_linearity = nn.ReLU()
+    model = xor_net(non_linearity=non_linearity) 
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
     train_loader = xor_loader(args.batch_size, train=True)
@@ -131,6 +136,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"xor_net_sigmoid_{epoch + 1:02d}.pt")
+        torch.save(model.state_dict(), output_dir / f"xor_net_{args.activation.lower()}_{epoch + 1:02d}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)
