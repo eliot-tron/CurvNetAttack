@@ -27,7 +27,10 @@ class Foliation(GeometricModel):
         def f(t, y):
             J = self.jac_proba(torch.tensor(y).float().unsqueeze(0)).squeeze(0).detach()
             a, b = J[0]
-            e = torch.tensor([b, -a])
+            if transverse:
+                e = torch.tensor([a, b])
+            else:
+                e = torch.tensor([b, -a])
             # e = J[0]
             e = e / e.norm(2)
             # e = null_space(J) 
@@ -52,14 +55,14 @@ class Foliation(GeometricModel):
 
         """
         self.task = "xor"
-        scale = 0.2
+        scale = 0.1
         if leaves:
             print("Plotting the leaves...")
             xs = torch.arange(0, 1.5 + scale, scale)
             initial_coordinates = torch.cartesian_prod(xs, xs)
             for y0 in tqdm(initial_coordinates):
                 try:
-                    leaves = self.compute_leaf(y0)
+                    leaves = self.compute_leaf(y0, transverse=transverse)
                     plt.plot(leaves[0], leaves[1], "b-", zorder=1)
                 except ValueError:
                     J = self.jac_proba(torch.tensor(y0).float().unsqueeze(0)).squeeze(0).detach()

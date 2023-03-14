@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 from geometry import GeometricModel
+from matplotlib import cm
+from matplotlib.colors import SymLogNorm
 
 
 class AdversarialAttack(GeometricModel):
@@ -86,6 +88,76 @@ class AdversarialAttack(GeometricModel):
         savepath = "./output/attacks_{}_{}".format(type(self).__name__, self.task)
         plt.savefig(savepath + '.pdf', format='pdf')
         plt.show()
+    
+    
+    def plot_curvature_2D(self):
+        """Plot the extrinsic curvature for a 2D input manifold and 1D leaves.
+        """
+
+        xs = torch.linspace(0, 1, steps=100)
+        grid = torch.cartesian_prod(xs, xs)
+        p = self.proba(grid)[..., 1]
+        p = p.reshape((*xs.shape, *xs.shape))
+        plt.pcolormesh(xs, xs, p.detach().numpy()) 
+        # levels = torch.logspace(-16, 0, 20)
+        # plt.contour(xs, xs, p.detach().numpy(), levels=levels)
+        plt.colorbar()
+        plt.show()
+
+        G_1 = self.local_data_matrix(grid)
+        if G_1.is_cuda:
+            _, _, v_1 = torch.linalg.svd(G_1)
+            normal = v_1[..., 0]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
+            normal = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
+        norm_1 = torch.linalg.vector_norm(normal, ord=2, dim=-1, keepdim=True)
+        normal = normal / norm_1
+        normal = normal.reshape(grid.shape)
+
+        """Computing first step's sign."""
+        # print("compute attack sign")
+        normal_sign = self.attack_sign(grid, normal)
+        normal = torch.einsum('z, z... -> z...', normal_sign, normal)
+
+        dx = 1e-3 * normal
+        print(f"grid: {grid.shape} and dx: {dx.shape}")
+        print(f"grid + dx: {(grid+dx).shape}")
+        G_dx = self.local_data_matrix(grid + dx)
+
+        if G_dx.is_cuda:
+            _, _, v_dx = torch.linalg.svd(G_dx)
+            normal_dx = v_dx[..., 0]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v_dx = torch.linalg.eigh(G_dx)  # value, vector, in ascending order
+            normal_dx = v_dx[..., -1]  # be careful, it isn't intuitive -> RTD
+        
+        """Computing second step's sign."""
+        normal_dx_sign = torch.einsum('z..., z... -> z', normal, normal_dx).sign()
+        normal_dx_sign[normal_dx_sign==0] = 1
+        normal_dx = torch.einsum('z, z... -> z...', normal_dx_sign, normal_dx)
+
+
+        cross = normal[..., 0] * normal_dx[..., 1] - normal[..., 1] * normal_dx[..., 0]
+        print(f"cross: {cross.shape}")
+
+        dtheta = torch.asin(cross.abs())
+        
+        """3D plot"""
+        # X, Y = torch.meshgrid(xs, xs)
+        # dtheta = dtheta.reshape(X.shape)
+
+        # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+        # ax.plot_surface(X, Y, dtheta.detach(), cmap=cm.Blues)
+
+        """2D color plot"""
+        dtheta = dtheta.reshape((*xs.shape, *xs.shape)).detach()
+        plt.pcolormesh(xs, xs, dtheta, norm=SymLogNorm(dtheta.abs().min().numpy() + 1e-12))
+        plt.colorbar()
+
+        # plt.show()
+
+        
 
     # def save_xor_fooling_rates(self, nb_test_points=int(5e3), step=1e-2, size=1, end=1):
     #     """Saves the graph of fooling rates with respect to the budget.

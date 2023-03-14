@@ -16,9 +16,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = torch.device('cpu')
     print(f"Device: {device}")
-    dataset_name = ["MNIST", "XOR"][0]
-    num_samples = 1000
-    task = ["", "plot-attack", "plot-attacks-2D", "fooling-rates", "plot-leaves"][3]
+    dataset_name = ["MNIST", "XOR"][1]
+    num_samples = 135
+    task = ["", "plot-attack", "plot-attacks-2D", "fooling-rates", "plot-leaves", "plot-curvature"][-1]
     non_linearity = ['Sigmoid', 'ReLU'][0]
     if dataset_name == "MNIST":
         MAX_BUDGET = 10
@@ -26,6 +26,9 @@ if __name__ == "__main__":
     elif dataset_name == "XOR":
         MAX_BUDGET = 1
         STEP_BUDGET = 0.01
+    
+    if task == "plot-curvature":
+        dataset_name = "XOR"
 
     if dataset_name == "MNIST":
         if non_linearity == 'Sigmoid':
@@ -47,11 +50,11 @@ if __name__ == "__main__":
         )
     elif dataset_name == "XOR":
         if non_linearity == 'Sigmoid':
-            checkpoint_path = './checkpoint/xor_net_22_Sigmoid.pt'
-            print("/!\\ "*5 + "\nSigmoid for Xor not working.")
+            checkpoint_path = './checkpoint/xor_net_sigmoid_20.pt'
+            # print("/!\\ "*5 + "\nSigmoid for Xor not working.")
             non_linearity = nn.Sigmoid()
         elif non_linearity == 'ReLU':
-            checkpoint_path = './checkpoint/xor_net_30_ReLU.pt'
+            checkpoint_path = './checkpoint/xor_net_relu_30.pt'
             non_linearity = nn.ReLU()
         print("Loading net")
         network = xor_net(checkpoint_path, non_linearity=non_linearity)
@@ -136,6 +139,11 @@ if __name__ == "__main__":
     
     if task == "plot-leaves":
         foliation.plot(eigenvectors=False)
+    
+    if task == "plot-curvature":
+        STSSA.plot_curvature_2D()
+        foliation.plot(eigenvectors=False, transverse=False)
+        plt.show()
     
     # num_samples = 1
     # STSSA.test_jac_proba(input_points)
