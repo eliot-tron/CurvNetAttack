@@ -142,7 +142,7 @@ if __name__ == "__main__":
     
     if task == "plot-curvature":
         STSSA.plot_curvature_2D()
-        foliation.plot(eigenvectors=False, transverse=False)
+        foliation.plot(eigenvectors=False, transverse=True)
         plt.show()
     
     # num_samples = 1

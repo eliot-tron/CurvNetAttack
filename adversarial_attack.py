@@ -141,7 +141,7 @@ class AdversarialAttack(GeometricModel):
         cross = normal[..., 0] * normal_dx[..., 1] - normal[..., 1] * normal_dx[..., 0]
         print(f"cross: {cross.shape}")
 
-        dtheta = torch.asin(cross.abs())
+        dtheta = torch.asin(cross)
         
         """3D plot"""
         # X, Y = torch.meshgrid(xs, xs)
@@ -152,7 +152,7 @@ class AdversarialAttack(GeometricModel):
 
         """2D color plot"""
         dtheta = dtheta.reshape((*xs.shape, *xs.shape)).detach()
-        plt.pcolormesh(xs, xs, dtheta, norm=SymLogNorm(dtheta.abs().min().numpy() + 1e-12))
+        plt.pcolormesh(xs, xs, dtheta, cmap='PRGn')
         plt.colorbar()
 
         # plt.show()
