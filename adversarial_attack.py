@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 from geometry import GeometricModel
-from matplotlib import cm
-from matplotlib.colors import SymLogNorm
 
 
 class AdversarialAttack(GeometricModel):
@@ -66,131 +64,34 @@ class AdversarialAttack(GeometricModel):
 
         return fooling_rate
 
-    def test_points_2D(self, nb_points, size=1):
-        """Generate test points uniformly in the square [0.5-size/2, 0.5+size/2]^2."""
-        return (torch.rand(nb_points, 2) - 0.5)* size + 0.5
 
-    def plot_attacks_2D(self, test_points, budget=0.3):
-        """Plots the attack vectors on the input space."""        
-        self.task = "xor"
-        attack_vectors = self.compute_attack(test_points, budget) - test_points
-        attack_vectors = attack_vectors.detach()
-        for coords, attack_vector in tqdm(zip(test_points, attack_vectors)):
-            plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2)
-        if self.task == "xor":
-            plt.plot([0, 1], [0, 1], "ro", zorder=3)
-            plt.plot([0, 1], [1, 0], "go", zorder=3)
-        elif self.task == "or":
-            plt.plot([0], [0], "ro", zorder=3)
-            plt.plot([0, 1, 1], [1, 0, 1], "go", zorder=3)
-        plt.xlim([-0.1, 1.1])
-        plt.ylim([-0.1, 1.1])
-        savepath = "./output/attacks_{}_{}".format(type(self).__name__, self.task)
-        plt.savefig(savepath + '.pdf', format='pdf')
-        plt.show()
+    def save_attack(
+        self,
+        test_points: torch.tensor,
+        budget_step: float=1e-2,
+        budget_max: float=1.,
+        savepath: str="./output/attacked_points"
+        ) -> None:
+
+        budget_range = torch.arange(0, budget_max, budget_step).cpu()
+        
+        attack_vectors = [self.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)]
+        torch.save((budget_range, test_points, attack_vectors), savepath + 'budget-points-attack.pt')
     
     
-    def plot_curvature_2D(self):
-        """Plot the extrinsic curvature for a 2D input manifold and 1D leaves.
-        """
-
-        xs = torch.linspace(0, 1, steps=100)
-        grid = torch.cartesian_prod(xs, xs)
-        p = self.proba(grid)[..., 1]
-        p = p.reshape((*xs.shape, *xs.shape))
-        plt.pcolormesh(xs, xs, p.detach().numpy()) 
-        # levels = torch.logspace(-16, 0, 20)
-        # plt.contour(xs, xs, p.detach().numpy(), levels=levels)
-        plt.colorbar()
-        plt.show()
-
-        G_1 = self.local_data_matrix(grid)
-        if G_1.is_cuda:
-            _, _, v_1 = torch.linalg.svd(G_1)
-            normal = v_1[..., 0]  # be careful, it isn't intuitive -> RTD
-        else:
-            _, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
-            normal = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
-        norm_1 = torch.linalg.vector_norm(normal, ord=2, dim=-1, keepdim=True)
-        normal = normal / norm_1
-        normal = normal.reshape(grid.shape)
-
-        """Computing first step's sign."""
-        # print("compute attack sign")
-        normal_sign = self.attack_sign(grid, normal)
-        normal = torch.einsum('z, z... -> z...', normal_sign, normal)
-
-        dx = 1e-3 * normal
-        print(f"grid: {grid.shape} and dx: {dx.shape}")
-        print(f"grid + dx: {(grid+dx).shape}")
-        G_dx = self.local_data_matrix(grid + dx)
-
-        if G_dx.is_cuda:
-            _, _, v_dx = torch.linalg.svd(G_dx)
-            normal_dx = v_dx[..., 0]  # be careful, it isn't intuitive -> RTD
-        else:
-            _, v_dx = torch.linalg.eigh(G_dx)  # value, vector, in ascending order
-            normal_dx = v_dx[..., -1]  # be careful, it isn't intuitive -> RTD
+    def batch_save_attack(
+        self,
+        test_points: torch.tensor,
+        batch_size: int=125,
+        budget_step: float=1e-2,
+        budget_max: float=1.,
+        savepath: str="./output/attacked_points"
+        ) -> None:
         
-        """Computing second step's sign."""
-        normal_dx_sign = torch.einsum('z..., z... -> z', normal, normal_dx).sign()
-        normal_dx_sign[normal_dx_sign==0] = 1
-        normal_dx = torch.einsum('z, z... -> z...', normal_dx_sign, normal_dx)
+        for batch_index, test_points_batch in enumerate(torch.split(test_points, batch_size, dim=0)):
+            self.save_attack(test_points_batch, budget_step, budget_max, f"{savepath}_{batch_index}")
 
 
-        cross = normal[..., 0] * normal_dx[..., 1] - normal[..., 1] * normal_dx[..., 0]
-        print(f"cross: {cross.shape}")
-
-        dtheta = torch.asin(cross)
-        
-        """3D plot"""
-        # X, Y = torch.meshgrid(xs, xs)
-        # dtheta = dtheta.reshape(X.shape)
-
-        # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-        # ax.plot_surface(X, Y, dtheta.detach(), cmap=cm.Blues)
-
-        """2D color plot"""
-        dtheta = dtheta.reshape((*xs.shape, *xs.shape)).detach()
-        plt.pcolormesh(xs, xs, dtheta, cmap='PRGn')
-        plt.colorbar()
-
-        # plt.show()
-
-        
-
-    # def save_xor_fooling_rates(self, nb_test_points=int(5e3), step=1e-2, size=1, end=1):
-    #     """Saves the graph of fooling rates with respect to the budget.
-    #     :returns: None
-    #     """
-        
-    #     test_points = self.test_points_2D(nb_test_points, size)  # maybe change this
-    #     budget_range = torch.arange(0, end, step)
-    #     fooling_rates = [self.test_attack(budget, test_points) for budget in tqdm(budget_range)]
-    #     plt.plot(budget_range, fooling_rates, label=type(self).__name__)
-    #     plt.xlabel("Budget")
-    #     plt.ylabel("Fooling rate")
-    #     savepath = "./output/fooling_rates_{}".format(type(self).__name__)
-    #     plt.savefig(savepath + '.pdf', format='pdf')
-
-
-    def save_fooling_rates(self, test_points, step=1e-2, end=1, savepath="./output/fooling_rates"):
-        """Saves the graph of fooling rates with respect to the budget.
-        :test_point: points to compute the fooling rates on.
-        :step: step size between two budgets.
-        :end: max budget.
-        :returns: None
-        """
-        
-        budget_range = torch.arange(0, end, step).cpu()
-        fooling_rates = [self.test_attack(budget, test_points).cpu() for budget in tqdm(budget_range)]
-        plt.plot(budget_range, fooling_rates, label=type(self).__name__)
-        plt.xlabel("Budget")
-        plt.ylabel("Fooling rate")
-        savepath = savepath + f"_{type(self).__name__}"
-        torch.save((budget_range, fooling_rates), savepath + '_budget-rates.pt')
-        # plt.savefig(savepath + '.pdf', format='pdf')
-        # plt.show()
 
 class StandardTwoStepSpectralAttack(AdversarialAttack):
     """Class to compute the two-step spectral attack in
@@ -215,7 +116,7 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         # print("computing eigh")
         if G_1.is_cuda:
             _, _, v_1 = torch.linalg.svd(G_1)
-            first_step = v_1[..., 0]  # be careful, it isn't intuitive -> RTD
+            first_step = v_1[..., 0, :]  # be careful, it isn't intuitive -> RTD
         else:
             _, v_1 = torch.linalg.eigh(G_1)  # value, vector, in ascending order
             first_step = v_1[..., -1]  # be careful, it isn't intuitive -> RTD
@@ -236,7 +137,7 @@ class StandardTwoStepSpectralAttack(AdversarialAttack):
         G_2 = self.local_data_matrix(input_sample + first_step)
         if G_2.is_cuda:
             _, _, v_2 = torch.linalg.svd(G_2)
-            second_step = v_2[..., 0]  # be careful, it isn't intuitive -> RTD
+            second_step = v_2[..., 0, :]  # be careful, it isn't intuitive -> RTD
         else:
             _, v_2 = torch.linalg.eigh(G_2)  # value, vector, in ascending order
             second_step = v_2[..., -1]  # be careful, it isn't intuitive -> RTD
@@ -274,9 +175,23 @@ class OneStepSpectralAttack(AdversarialAttack):
         """
 
         G = self.local_data_matrix(input_sample)
+        # _, _, v_svd = torch.linalg.svd(G)
+        # perturbation_svd = v_svd[..., 0, :]  # be careful, it isn't intuitive -> RTD
+        # norm_svd = torch.linalg.vector_norm(perturbation_svd, ord=2, dim=-1, keepdim=True)
+        # perturbation_svd = perturbation_svd / norm_svd
+        # _, v_eigh = torch.linalg.eigh(G)  # value, vector, in ascending order
+        # perturbation_eigh = v_eigh[..., -1]  # be careful, it isn't intuitive -> RTD
+        # norm_eigh = torch.linalg.vector_norm(perturbation_eigh, ord=2, dim=-1, keepdim=True)
+        # perturbation_eigh = perturbation_eigh / norm_eigh
+        # if torch.allclose(perturbation_svd.abs(), perturbation_eigh.abs()):
+        #     print("RAS")
+        # else:
+        #     max_deviation = (perturbation_svd.abs() - perturbation_eigh.abs()).abs().max() / max(perturbation_svd.abs().max(), perturbation_eigh.abs().max())
+        #     print(f"c la merde: {max_deviation}")
+
         if G.is_cuda:
             _, _, v = torch.linalg.svd(G)
-            perturbation = v[..., 0]  # be careful, it isn't intuitive -> RTD
+            perturbation = v[..., 0, :]  # be careful, it isn't intuitive -> RTD
         else:
             _, v = torch.linalg.eigh(G)  # value, vector, in ascending order
             perturbation = v[..., -1]  # be careful, it isn't intuitive -> RTD

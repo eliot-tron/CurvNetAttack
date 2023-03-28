@@ -1,3 +1,4 @@
+import argparse
 from os import makedirs, path
 import torch
 import torchvision.datasets as datasets
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 
 from adversarial_attack import (OneStepSpectralAttack,
                                 StandardTwoStepSpectralAttack)
+from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_curvature_2D
 from mnist_networks import medium_cnn
 from xor_networks import xor_net
 from xor_datasets import XorDataset
@@ -13,16 +15,52 @@ from foliation import Foliation
 from torch import nn
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Compute a One-Step or Two-Step spectral attack, and some visualizations.",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="MNIST",
+        choices=['MNIST', 'XOR'],
+        help="Dataset name to be used.",
+    )
+    parser.add_argument(
+        "--nsample",
+        type=int,
+        metavar='N',
+        default=128,
+        help="Number of points to compute the attack on."
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="fooling-rates",
+        choices=['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'plot-leaves', 'plot-curvature', 'inf-norm'],
+        help="Task."
+    )
+    parser.add_argument(
+        "--nl",
+        type=str,
+        metavar='f',
+        default="relu",
+        choices=['Sigmoid', 'ReLU'],
+        help="Non linearity used by the network."
+    )
+    args = parser.parse_args()
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = torch.device('cpu')
     print(f"Device: {device}")
-    dataset_name = ["MNIST", "XOR"][1]
-    num_samples = 135
-    task = ["", "plot-attack", "plot-attacks-2D", "fooling-rates", "plot-leaves", "plot-curvature"][-1]
-    non_linearity = ['Sigmoid', 'ReLU'][0]
+    
+    dataset_name = args.dataset
+    num_samples = args.nsample
+    task = args.task
+    non_linearity = args.nl
+
     if dataset_name == "MNIST":
         MAX_BUDGET = 10
-        STEP_BUDGET = 0.1
+        STEP_BUDGET = 1
     elif dataset_name == "XOR":
         MAX_BUDGET = 1
         STEP_BUDGET = 0.01
@@ -67,6 +105,11 @@ if __name__ == "__main__":
         )
         print("dataset loaded")
 
+    if torch.cuda.device_count() > 1:
+        print(f"Let's use {torch.cuda.device_count()} GPUs!")
+        network = nn.DataParallel(network)
+        network_score = nn.DataParallel(network_score)
+
     network = network.to(device)
     network_score = network_score.to(device)
 
@@ -92,7 +135,7 @@ if __name__ == "__main__":
     
     print(f'Task {task} with dataset {dataset_name} and {num_samples} samples.')
 
-    if task in ["", "plot-attack", "fooling-rates", "plot-attacks-2D"]:
+    if task in ["", "plot-attack", "fooling-rates", "plot-attacks-2D", "inf-norm"]:
         if task == "plot-attack":
             num_samples = 1
         
@@ -123,25 +166,41 @@ if __name__ == "__main__":
         savedirectory = f"./output/{dataset_name}/"
         if not path.isdir(savedirectory):
             makedirs(savedirectory)
-        STSSA.save_fooling_rates(input_points, step=STEP_BUDGET, end=MAX_BUDGET, savepath=savedirectory + f"fooling_rates_nsample={num_samples}")
-        OSSA.save_fooling_rates(input_points, step=STEP_BUDGET, end=MAX_BUDGET, savepath=savedirectory + f"fooling_rates_nsample={num_samples}")
-        plt.legend()
         savename = f"fooling_rates_compared_nsample={num_samples}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
-        plt.savefig(savepath + '.pdf')
-        plt.clf()
+        compare_fooling_rates(
+            [STSSA, OSSA],
+            input_points,
+            step=STEP_BUDGET,
+            end=MAX_BUDGET,
+            savepath=savepath
+        )
+
+    if task == "inf-norm":
+        savedirectory = f"./output/{dataset_name}/"
+        if not path.isdir(savedirectory):
+            makedirs(savedirectory)
+        savename = f"inf_norm_compared_nsample={num_samples}"
+        savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
+        compare_inf_norm(
+            [STSSA, OSSA],
+            input_points,
+            step=STEP_BUDGET,
+            end=MAX_BUDGET,
+            savepath=savepath
+        )
 
     if task == "plot-attacks-2D":
         foliation.plot(eigenvectors=False)
-        STSSA.plot_attacks_2D(test_points=input_points,budget=0.1)
+        plot_attacks_2D(STSSA, test_points=input_points,budget=0.1)
         foliation.plot(eigenvectors=False)
-        OSSA.plot_attacks_2D(test_points=input_points, budget=0.1)
+        plot_attacks_2D(OSSA, test_points=input_points, budget=0.1)
     
     if task == "plot-leaves":
         foliation.plot(eigenvectors=False)
     
     if task == "plot-curvature":
-        STSSA.plot_curvature_2D()
+        plot_curvature_2D(STSSA)
         foliation.plot(eigenvectors=False, transverse=True)
         plt.show()
     
