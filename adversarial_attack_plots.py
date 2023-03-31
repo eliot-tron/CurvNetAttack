@@ -4,29 +4,38 @@ import torch
 from tqdm import tqdm
 from geometry import GeometricModel
 from adversarial_attack import AdversarialAttack, StandardTwoStepSpectralAttack, OneStepSpectralAttack
+from typing import Tuple, Union
 from matplotlib import cm
 from matplotlib.colors import SymLogNorm
 
 def compare_fooling_rates(
     adversarial_attacks: list[AdversarialAttack],
-    test_points: torch.tensor,
-    step: float=1e-2,
-    end: float=1.,
-    savepath: str="./output/fooling_rates_compared"
+    test_points: torch.Tensor,
+    budget_range: Union[torch.Tensor, Tuple[float, float]]=(1., 1e-2),
+    savepath: str="./output/fooling_rates_compared",
+    attack_vectors: list[list[torch.Tensor]]=None,
     ) -> None:
     """Saves the graph of fooling rates with respect to the budget.
     :adversarial_attacks: list of attacks to compare.
     :test_point: points to compute the fooling rates on.
-    :step: step size between two budgets.
-    :end: max budget.
+    :budget_range: tensor of budgets or tuple (max_budget, step_size) to generate an arange from 0.
+    :attack_vectors: precomputed attack vectors for each adversarial_attack classes.
     :returns: None
     """
-    
-    for attack in adversarial_attacks:
+    if not torch.is_tensor(budget_range):
+        end, step = budget_range
         budget_range = torch.arange(0, end, step).cpu()
-        fooling_rates = [attack.test_attack(budget, test_points).cpu() for budget in tqdm(budget_range)]
-        plt.plot(budget_range, fooling_rates, label=type(attack).__name__)
-        torch.save((budget_range, fooling_rates), savepath + f"_{type(attack).__name__}_budget-rates.pt")
+
+    if attack_vectors is None:
+        for attack in adversarial_attacks:
+            fooling_rates = [attack.test_attack(budget, test_points).cpu() for budget in tqdm(budget_range)]
+            plt.plot(budget_range, fooling_rates, label=type(attack).__name__)
+            torch.save((budget_range, fooling_rates), savepath + f"_{type(attack).__name__}_budget-rates.pt")
+    else:
+        for attack, attack_by_budget in zip(adversarial_attacks, attack_vectors):
+            fooling_rates = [attack.test_attack(budget, test_points, av).cpu() for budget, av in tqdm(zip(budget_range, attack_by_budget))]
+            plt.plot(budget_range, fooling_rates, label=type(attack).__name__)
+            torch.save((budget_range, fooling_rates), savepath + f"_{type(attack).__name__}_budget-rates.pt")
 
     plt.xlabel("Budget")
     plt.ylabel("Fooling rate")
@@ -36,10 +45,10 @@ def compare_fooling_rates(
 
 def compare_inf_norm(
     adversarial_attacks: list[AdversarialAttack],
-    test_points: torch.tensor,
-    step: float=1e-2,
-    end: float=1.,
-    savepath: str="./output/infinity_norm_compared"
+    test_points: torch.Tensor,
+    budget_range: Union[torch.Tensor, Tuple[float, float]]=(1., 1e-2),
+    savepath: str="./output/infinity_norm_compared",
+    attack_vectors: list[list[torch.Tensor]]=None,
     ) -> None:
     """Save the plot of the infinity norm with respect to the euclidean budget.
 
@@ -49,16 +58,20 @@ def compare_inf_norm(
         step (float, optional): stem size between two budgets. Defaults to 1e-2.
         end (int, optional): max budget. Defaults to 1.
         savepath (str, optional): Path to save the plot to. Defaults to "./output/infty_norm".
+        attack_vectors: precomputed attack vetors for each adversarial attack classes.
 
     Returns:
         _type_: None
     """
 
-    budget_range = torch.arange(0, end, step).cpu()
-    attack_vectors = []
+    if not torch.is_tensor(budget_range):
+        end, step = budget_range
+        budget_range = torch.arange(0, end, step).cpu()
     
-    for attack in adversarial_attacks:
-        attack_vectors.append([attack.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)])
+    if attack_vectors is None:
+        attack_vectors = []
+        for attack in adversarial_attacks:
+            attack_vectors.append([attack.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)])
     
     for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
         infty_norms = torch.linalg.vector_norm(attack_vec[-1].reshape(attack_vec[-1].shape[0], -1), ord=float('inf'), dim=1)

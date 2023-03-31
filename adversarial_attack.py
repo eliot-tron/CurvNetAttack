@@ -36,26 +36,33 @@ class AdversarialAttack(GeometricModel):
             torch.Tensor: Batch tensor of the sign
         """
 
-        max_likelihood_attacked, max_indices = torch.max(self.proba(init_point + perturbation), dim=1)
-        max_likelihood_origin = self.proba(init_point).gather(1, max_indices.unsqueeze(1)).squeeze(1)
+        max_likelihood_origin, max_indices = torch.max(self.proba(init_point), dim=1)
+        # max_likelihood_attacked, max_indices = torch.max(self.proba(init_point + perturbation), dim=1)
+        max_likelihood_attacked = self.proba(init_point + perturbation).gather(1, max_indices.unsqueeze(1)).squeeze(1)
+        max_likelihood_attacked_neg = self.proba(init_point - perturbation).gather(1, max_indices.unsqueeze(1)).squeeze(1)
 
-        perturbation_sign = torch.sign(max_likelihood_origin - max_likelihood_attacked)  # TODO: sum, or else ?
+        perturbation_sign = torch.sign(max_likelihood_attacked_neg - max_likelihood_attacked)  # TODO: sum, or else ?
         perturbation_sign[perturbation_sign==0] = zero_value
         
         return perturbation_sign
 
         
-    def test_attack(self, budget, test_points):
+    def test_attack(self, budget, test_points, attack_vectors=None):
         """Computes multiple attacks to check the fooling
         rate of the attack.
 
         :budget: max euclidean size of an attack
+        :test_points: points to attack
+        :attack: if not None, will not recompute the attack and will use this instead.
 
         :returns: fooling rate
         """
         
-        # print("get attacked point")
-        attacked_points = self.compute_attack(test_points, budget)
+        if attack_vectors is None:
+            # print("get attacked point")
+            attacked_points = self.compute_attack(test_points, budget)
+        else:
+            attacked_points = test_points + attack_vectors
         # print("get predicted label")
         predicted_labels = self.network(test_points).exp().argmax(dim=1)
         predicted_labels_attacked = self.network(attacked_points).exp().argmax(dim=1)
@@ -73,25 +80,12 @@ class AdversarialAttack(GeometricModel):
         savepath: str="./output/attacked_points"
         ) -> None:
 
-        budget_range = torch.arange(0, budget_max, budget_step).cpu()
+        budget_range = torch.arange(0, budget_max, budget_step)
         
-        attack_vectors = [self.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)]
-        torch.save((budget_range, test_points, attack_vectors), savepath + 'budget-points-attack.pt')
+        attack_vectors = [self.compute_attack(test_points, budget).detach() - test_points for budget in tqdm(budget_range)]
+        torch.save((budget_range, test_points, attack_vectors), savepath + f'_{type(self).__name__}_budget-points-attack.pt')
+        del attack_vectors
     
-    
-    def batch_save_attack(
-        self,
-        test_points: torch.tensor,
-        batch_size: int=125,
-        budget_step: float=1e-2,
-        budget_max: float=1.,
-        savepath: str="./output/attacked_points"
-        ) -> None:
-        
-        for batch_index, test_points_batch in enumerate(torch.split(test_points, batch_size, dim=0)):
-            self.save_attack(test_points_batch, budget_step, budget_max, f"{savepath}_{batch_index}")
-
-
 
 class StandardTwoStepSpectralAttack(AdversarialAttack):
     """Class to compute the two-step spectral attack in
@@ -201,3 +195,23 @@ class OneStepSpectralAttack(AdversarialAttack):
         perturbation_sign = self.attack_sign(input_sample, perturbation)
         perturbation = torch.einsum('z, z... -> z...', perturbation_sign, perturbation)
         return input_sample + perturbation
+
+    
+    def save_attack(self, test_points: torch.tensor, budget_step: float = 0.01, budget_max: float = 1, savepath: str = "./output/attacked_points") -> None:
+        """Allow to save some time by computing only one unit norm attack and multiplying by the budgets.
+            This works because the direction of the one step attack doesn't change wrt the budget.
+            However, we still need to recompute the sign of the perturbation.
+            
+        """
+
+        budget_range = torch.arange(0, budget_max, budget_step).cpu()
+        
+        unit_norm_perturbation =  (self.compute_attack(test_points, 1.).detach() - test_points)
+        attack_vectors = []
+        for budget in tqdm(budget_range):
+            perturbation = budget * unit_norm_perturbation
+            perturbation_sign = self.attack_sign(test_points, perturbation)
+            perturbation = torch.einsum('z, z... -> z...', perturbation_sign, perturbation)
+            attack_vectors.append(perturbation)
+        torch.save((budget_range, test_points, attack_vectors), savepath + f'_{type(self).__name__}_budget-points-attack.pt')
+        del attack_vectors

@@ -1,5 +1,7 @@
 import argparse
 from os import makedirs, path
+import random
+import numpy as np
 import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
@@ -36,17 +38,37 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="fooling-rates",
-        choices=['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'plot-leaves', 'plot-curvature', 'inf-norm'],
+        choices=['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'plot-leaves', 'plot-curvature', 'inf-norm', 'save-attacks'],
         help="Task."
     )
     parser.add_argument(
         "--nl",
         type=str,
         metavar='f',
-        default="relu",
+        default="ReLU",
         choices=['Sigmoid', 'ReLU'],
         help="Non linearity used by the network."
     )
+    parser.add_argument(
+        "--startidx",
+        type=int,
+        default=0,
+        help="Start index of the input points"
+    )
+    parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Permutes randomly the inputs."
+    )
+    parser.add_argument(
+        "--attacks",
+        type=str,
+        metavar="path",
+        nargs="+",
+        default=None,
+        help="Path to (budget, test_point, attack_vectors) if you had them precomputed."
+    )
+    
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,6 +79,19 @@ if __name__ == "__main__":
     num_samples = args.nsample
     task = args.task
     non_linearity = args.nl
+    start_index = args.startidx
+    attack_paths = args.attacks
+
+    if not args.random:
+        seed = 42
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+        np.random.seed(seed)  # Numpy module.
+        random.seed(seed)  # Python random module.
+        torch.manual_seed(seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
 
     if dataset_name == "MNIST":
         MAX_BUDGET = 10
@@ -97,7 +132,7 @@ if __name__ == "__main__":
         print("Loading net")
         network = xor_net(checkpoint_path, non_linearity=non_linearity)
         network_score = xor_net(checkpoint_path, score=True, non_linearity=non_linearity)
-        print("Networ loaded")
+        print("Network loaded")
 
         input_space = XorDataset(
             nsample=10000,
@@ -135,15 +170,42 @@ if __name__ == "__main__":
     
     print(f'Task {task} with dataset {dataset_name} and {num_samples} samples.')
 
-    if task in ["", "plot-attack", "fooling-rates", "plot-attacks-2D", "inf-norm"]:
+    
+    if attack_paths is not None:
+        budget_range_list, input_points_list, attack_vectors = [], [], []
+        for attack_path in attack_paths:
+            br, ip, av = torch.load(attack_path)
+            budget_range_list.append(br)
+            input_points_list.append(ip)
+            attack_vectors.append(av)
+        budget_range = budget_range_list[0]
+        input_points = input_points_list[0]
+        for br in budget_range_list:
+            if not torch.allclose(budget_range, br):
+                raise ValueError("The loaded attacks must have the same budgets.")
+        for ip in input_points_list:
+            if not torch.allclose(input_points, ip):
+                raise ValueError("The loaded attacks must have the same input points.")
+    else:
+        budget_range = (MAX_BUDGET, STEP_BUDGET)
+        attack_vectors = None
+
+    # Initialization of the input points
+    if task in ["", "plot-attack", "fooling-rates", "plot-attacks-2D", "inf-norm", "save-attacks"] and attack_paths is None:
         if task == "plot-attack":
             num_samples = 1
         
         if num_samples > len(input_space):
-            print(f'WARNING: you are trying to get mmore samples ({num_samples}) than the number of data in the test set ({len(input_space)})')
-        random_indices = torch.randperm(len(input_space))[:num_samples]
-        input_points = torch.stack([input_space[idx][0] for idx in random_indices])
+            print(f'WARNING: you are trying to get more samples ({num_samples}) than the number of data in the test set ({len(input_space)})')
+        
+        if args.random:
+            indices = torch.randperm(len(input_space))[:num_samples]
+        else:
+            indices = range(start_index, start_index + num_samples)
+
+        input_points = torch.stack([input_space[idx][0] for idx in indices])
         input_points = input_points.to(device)
+
 
     if task == "plot-attack":
         plt.matshow(input_points[0][0])
@@ -162,19 +224,56 @@ if __name__ == "__main__":
         plt.matshow(two_step_attack.detach().numpy()[0][0] - one_step_attack.detach().numpy()[0][0])
         plt.show()
     
+    
+    if task == "save-attacks":
+        savedirectory = f"./output/{dataset_name}/attacked_points/"
+        if not path.isdir(savedirectory):
+            makedirs(savedirectory)
+        savename = f"attacks_nsample={num_samples}_start={start_index}"
+        savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
+
+        if device.type == 'cuda':
+            batched_input_points = torch.split(input_points, 250 , dim=0)
+        else: # enough memory in cpu for a single batch
+            batched_input_points = [input_points]
+
+        for batch_index, batch in enumerate(batched_input_points):
+            print(f"Batch number {batch_index} starting...")
+            STSSA.save_attack(
+                test_points=batch,
+                budget_step=STEP_BUDGET,
+                budget_max=MAX_BUDGET,
+                savepath=savepath + f"_batch={batch_index}"
+            )
+            OSSA.save_attack(
+                test_points=batch,
+                budget_step=STEP_BUDGET,
+                budget_max=MAX_BUDGET,
+                savepath=savepath + f"_batch={batch_index}"
+            )
+            torch.cuda.empty_cache()
+    
     if task == "fooling-rates":
         savedirectory = f"./output/{dataset_name}/"
         if not path.isdir(savedirectory):
             makedirs(savedirectory)
-        savename = f"fooling_rates_compared_nsample={num_samples}"
+        savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
-        compare_fooling_rates(
-            [STSSA, OSSA],
-            input_points,
-            step=STEP_BUDGET,
-            end=MAX_BUDGET,
-            savepath=savepath
-        )
+
+        if device.type == 'cuda':
+            batched_input_points = torch.split(input_points, 250 , dim=0)
+        else: # enough memory in cpu for a single batch
+            batched_input_points = [input_points]
+
+        for batch_index, batch in enumerate(batched_input_points):
+            print(f"Batch number {batch_index} starting...")
+            compare_fooling_rates(
+                [STSSA, OSSA],
+                batch,
+                budget_range=budget_range,
+                savepath=savepath + f"_batch={batch_index}",
+                attack_vectors=attack_vectors
+            )
 
     if task == "inf-norm":
         savedirectory = f"./output/{dataset_name}/"
@@ -182,13 +281,21 @@ if __name__ == "__main__":
             makedirs(savedirectory)
         savename = f"inf_norm_compared_nsample={num_samples}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
-        compare_inf_norm(
-            [STSSA, OSSA],
-            input_points,
-            step=STEP_BUDGET,
-            end=MAX_BUDGET,
-            savepath=savepath
-        )
+
+        if device.type == 'cuda':
+            batched_input_points = torch.split(input_points, 250 , dim=0)
+        else: # enough memory in cpu for a single batch
+            batched_input_points = [input_points]
+
+        for batch_index, batch in enumerate(batched_input_points):
+            print(f"Batch number {batch_index} starting...")
+            compare_inf_norm(
+                [STSSA, OSSA],
+                batch,
+                budget_range=budget_range,
+                savepath=savepath,
+                attack_vectors=attack_vectors
+            )
 
     if task == "plot-attacks-2D":
         foliation.plot(eigenvectors=False)
