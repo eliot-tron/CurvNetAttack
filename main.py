@@ -174,7 +174,7 @@ if __name__ == "__main__":
     if attack_paths is not None:
         budget_range_list, input_points_list, attack_vectors = [], [], []
         for attack_path in attack_paths:
-            br, ip, av = torch.load(attack_path)
+            br, ip, av = torch.load(attack_path, map_location=device)
             budget_range_list.append(br)
             input_points_list.append(ip)
             attack_vectors.append(av)
