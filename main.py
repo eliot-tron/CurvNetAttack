@@ -81,6 +81,7 @@ if __name__ == "__main__":
     non_linearity = args.nl
     start_index = args.startidx
     attack_paths = args.attacks
+    batch_size = 125
 
     if not args.random:
         seed = 42
@@ -95,7 +96,7 @@ if __name__ == "__main__":
 
     if dataset_name == "MNIST":
         MAX_BUDGET = 10
-        STEP_BUDGET = 1
+        STEP_BUDGET = 0.1
     elif dataset_name == "XOR":
         MAX_BUDGET = 1
         STEP_BUDGET = 0.01
@@ -168,27 +169,31 @@ if __name__ == "__main__":
 
     print("foliation created")
     
-    print(f'Task {task} with dataset {dataset_name} and {num_samples} samples.')
-
     
     if attack_paths is not None:
         budget_range_list, input_points_list, attack_vectors = [], [], []
+        print("Loading precomputed attacks", end='')
         for attack_path in attack_paths:
+            print(".", end='')
             br, ip, av = torch.load(attack_path, map_location=device)
             budget_range_list.append(br)
             input_points_list.append(ip)
             attack_vectors.append(av)
         budget_range = budget_range_list[0]
         input_points = input_points_list[0]
+        print("done")
         for br in budget_range_list:
             if not torch.allclose(budget_range, br):
                 raise ValueError("The loaded attacks must have the same budgets.")
         for ip in input_points_list:
             if not torch.allclose(input_points, ip):
                 raise ValueError("The loaded attacks must have the same input points.")
+        num_samples = input_points.shape[0]
     else:
         budget_range = (MAX_BUDGET, STEP_BUDGET)
         attack_vectors = None
+
+    print(f'Task {task} with dataset {dataset_name} and {num_samples} samples.')
 
     # Initialization of the input points
     if task in ["", "plot-attack", "fooling-rates", "plot-attacks-2D", "inf-norm", "save-attacks"] and attack_paths is None:
@@ -233,7 +238,7 @@ if __name__ == "__main__":
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
         if device.type == 'cuda':
-            batched_input_points = torch.split(input_points, 250 , dim=0)
+            batched_input_points = torch.split(input_points, batch_size , dim=0)
         else: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
 
@@ -261,7 +266,7 @@ if __name__ == "__main__":
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
         if device.type == 'cuda':
-            batched_input_points = torch.split(input_points, 250 , dim=0)
+            batched_input_points = torch.split(input_points, batch_size , dim=0)
         else: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
 
@@ -283,7 +288,7 @@ if __name__ == "__main__":
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
         if device.type == 'cuda':
-            batched_input_points = torch.split(input_points, 250 , dim=0)
+            batched_input_points = torch.split(input_points, batch_size , dim=0)
         else: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
 
