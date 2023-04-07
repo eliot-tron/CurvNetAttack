@@ -1,12 +1,25 @@
 """Module implementing various plot functions for comparing attacks."""
+from locale import normalize
 import matplotlib.pyplot as plt
 import torch
+from torch import nn
 from tqdm import tqdm
 from geometry import GeometricModel
 from adversarial_attack import AdversarialAttack, StandardTwoStepSpectralAttack, OneStepSpectralAttack
 from typing import Tuple, Union
 from matplotlib import cm
 from matplotlib.colors import SymLogNorm
+
+def colorbar(mappable):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    last_axes = plt.gca()
+    ax = mappable.axes
+    fig = ax.figure
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = fig.colorbar(mappable, cax=cax)
+    plt.sca(last_axes)
+    return cbar
 
 def compare_fooling_rates(
     adversarial_attacks: list[AdversarialAttack],
@@ -29,12 +42,12 @@ def compare_fooling_rates(
     if attack_vectors is None:
         for attack in adversarial_attacks:
             fooling_rates = [attack.test_attack(budget, test_points).cpu() for budget in tqdm(budget_range)]
-            plt.plot(budget_range, fooling_rates, label=type(attack).__name__)
+            plt.plot(budget_range.cpu(), fooling_rates, label=type(attack).__name__)
             torch.save((budget_range, fooling_rates), savepath + f"_{type(attack).__name__}_budget-rates.pt")
     else:
         for attack, attack_by_budget in zip(adversarial_attacks, attack_vectors):
             fooling_rates = [attack.test_attack(budget, test_points, av).cpu() for budget, av in tqdm(zip(budget_range, attack_by_budget))]
-            plt.plot(budget_range, fooling_rates, label=type(attack).__name__)
+            plt.plot(budget_range.cpu(), fooling_rates, label=type(attack).__name__)
             torch.save((budget_range, fooling_rates), savepath + f"_{type(attack).__name__}_budget-rates.pt")
 
     plt.xlabel("Budget")
@@ -74,33 +87,53 @@ def compare_inf_norm(
             attack_vectors.append([attack.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)])
     
     for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
-        infty_norms = torch.linalg.vector_norm(attack_vec[-1].reshape(attack_vec[-1].shape[0], -1), ord=float('inf'), dim=1)
-        imax = infty_norms.argmax(dim=0)
+        for budget_idx in range(0, len(budget_range), 10):
+            infty_norms = torch.linalg.vector_norm(attack_vec[budget_idx].reshape(attack_vec[budget_idx].shape[0], -1), ord=float('inf'), dim=1)
+            imax = infty_norms.argmax(dim=0)
 
-        figure, axes = plt.subplots(1, 3)
-        im = axes[0].matshow(test_points[imax].squeeze(0).detach())
-        axes[0].set_title("Test point")
-        axes[1].matshow(attack_vec[-1][imax].squeeze(0).detach())
-        axes[1].set_title("Attack vector")
-        axes[2].matshow((attack_vec[-1][imax] + test_points[imax]).squeeze(0).detach())
-        axes[2].set_title("Attacked point")
-        figure.colorbar(im, ax=axes.ravel().tolist())
-        [ax.set_axis_off() for ax in axes.ravel()]
-        plt.savefig(savepath + f"_{type(attack).__name__}_worst-case.pdf")
-        # plt.show()
-        figure.clf()
+            figure, axes = plt.subplots(1, 3)
+            figure.set_figwidth(15)
+            attack_vec_2plot = attack_vec[budget_idx][imax]
+            test_point_2plot = test_points[imax]
+            proba_test_point = attack.proba(test_point_2plot).squeeze(0)
+            class_test_point = torch.argmax(proba_test_point)
+            proba_attack_vec = attack.proba(attack_vec_2plot).squeeze(0)
+            class_attack_vec = torch.argmax(proba_attack_vec)
+            proba_attacked_point = attack.proba(test_point_2plot + attack_vec_2plot).squeeze(0)
+            class_attacked_point = torch.argmax(proba_attacked_point)
+            
+            im0 = axes[0].matshow(test_point_2plot.squeeze(0).detach(), vmax=3.5, vmin=-1)
+            axes[0].set_title(f"Test point\nPredicted class: {class_test_point}\n Confidence: {proba_test_point[class_test_point]*100:.1f}%")
+            colorbar(im0)
+            im1 = axes[1].matshow(attack_vec_2plot.squeeze(0).detach())
+            axes[1].set_title(f"Attack vector\nPredicted class: {class_attack_vec}\n Confidence: {proba_attack_vec[class_attack_vec]*100:.1f}%")
+            colorbar(im1)
+            im2 = axes[2].matshow((attack_vec_2plot + test_point_2plot).squeeze(0).detach(), vmax=3.5, vmin=-1)
+            axes[2].set_title(f"Attacked point\nPredicted class: {class_attacked_point}\n Confidence: {proba_attacked_point[class_attacked_point]*100:.1f}%")
+            colorbar(im2)
+            [ax.set_axis_off() for ax in axes.ravel()]
+            plt.savefig(savepath + f"_{type(attack).__name__}_worst-case_budget={budget_range[budget_idx]}.pdf")
+            # plt.show()
+            figure.clf()
 
-    for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
-        inf_norm = [torch.linalg.vector_norm(av, ord=float('inf'), dim=1).max().cpu().detach() for av in attack_vec]
-        plt.plot(budget_range, inf_norm, label=type(attack).__name__)
-        torch.save((budget_range, inf_norm), savepath + '_budget-infnorm.pt')
+    # for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
+    #     inf_norm = [torch.linalg.vector_norm(av, ord=float('inf'), dim=1).max().cpu().detach() for av in attack_vec]
+    #     plt.plot(budget_range, inf_norm, label=type(attack).__name__)
+    #     torch.save((budget_range, inf_norm), savepath + '_budget-infnorm.pt')
 
-    plt.xlabel("Budget")
-    plt.ylabel("Infinity norm")
-    plt.legend()
-    plt.savefig(savepath + '.pdf', format='pdf')
-    # plt.show()
-    plt.clf()
+    # plt.xlabel("Budget")
+    # plt.ylabel("Infinity norm")
+    # plt.legend()
+    # plt.savefig(savepath + '.pdf', format='pdf')
+    # # plt.show()
+    # plt.clf()
+
+def plot_attack(
+    adversarial_attack: AdversarialAttack,
+    number: int=1,
+    savepath: str='./output/atta' 
+) -> None:
+    raise NotImplementedError()
 
 def test_points_2D(nb_points, size=1):
     """Generate test points uniformly in the square [0.5-size/2, 0.5+size/2]^2."""

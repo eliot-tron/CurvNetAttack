@@ -9,18 +9,17 @@ class AdversarialAttack(GeometricModel):
     """Class to represent a general adversarial attack
     and to analyse its performances."""
 
-    def compute_attack(self, init_point, budget, *args, **kwargs):
+    def compute_attack(self, input_sample, budget, *args, **kwargs):
         """Computes the attack on point init_point with
         an euclidean budget.
 
-        :init_point: torch tensor (2)
+        :input_sample+: torch tensor (bs, d)
         :budget: positive real number
-        :returns: attacked point as a torch tensor (2)
+        :returns: attacked point as a torch tensor (bs, d)
 
         """
         raise NotImplementedError()
 
-    
     def attack_sign(
         self,
         init_point: torch.Tensor,
@@ -42,7 +41,7 @@ class AdversarialAttack(GeometricModel):
         max_likelihood_attacked_neg = self.proba(init_point - perturbation).gather(1, max_indices.unsqueeze(1)).squeeze(1)
 
         perturbation_sign = torch.sign(max_likelihood_attacked_neg - max_likelihood_attacked)  # TODO: sum, or else ?
-        perturbation_sign[perturbation_sign==0] = zero_value
+        perturbation_sign[perturbation_sign == 0] = zero_value
         
         return perturbation_sign
 
@@ -196,11 +195,17 @@ class OneStepSpectralAttack(AdversarialAttack):
         perturbation = torch.einsum('z, z... -> z...', perturbation_sign, perturbation)
         return input_sample + perturbation
 
-    
-    def save_attack(self, test_points: torch.tensor, budget_step: float = 0.01, budget_max: float = 1, savepath: str = "./output/attacked_points") -> None:
-        """Allow to save some time by computing only one unit norm attack and multiplying by the budgets.
-            This works because the direction of the one step attack doesn't change wrt the budget.
-            However, we still need to recompute the sign of the perturbation.
+    def save_attack(
+            self,
+            test_points: torch.tensor,
+            budget_step: float = 0.01,
+            budget_max: float = 1,
+            savepath: str = "./output/attacked_points"
+            ) -> None:
+        """Allow to save some time by computing only one unit norm attack
+        and multiplying by the budgets. This works because the direction
+        of the one step attack doesn't change wrt the budget. However,
+        we still need to recompute the sign of the perturbation.
             
         """
 

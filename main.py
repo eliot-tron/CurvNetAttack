@@ -141,7 +141,7 @@ if __name__ == "__main__":
         )
         print("dataset loaded")
 
-    if torch.cuda.device_count() > 1:
+    if torch.cuda.device_count() > 1 and device.type == 'cuda':
         print(f"Let's use {torch.cuda.device_count()} GPUs!")
         network = nn.DataParallel(network)
         network_score = nn.DataParallel(network_score)
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     network = network.to(device)
     network_score = network_score.to(device)
 
-    print("network to cuda done")
+    print(f"network to {device} done")
 
     STSSA = StandardTwoStepSpectralAttack(
                 network=network,
@@ -265,7 +265,7 @@ if __name__ == "__main__":
         savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
-        if device.type == 'cuda':
+        if device.type == 'cuda' and attack_paths is None:
             batched_input_points = torch.split(input_points, batch_size , dim=0)
         else: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
