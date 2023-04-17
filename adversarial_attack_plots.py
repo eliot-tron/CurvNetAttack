@@ -1,11 +1,12 @@
 """Module implementing various plot functions for comparing attacks."""
 from locale import normalize
 import matplotlib.pyplot as plt
+from numpy import save
 import torch
 from torch import nn
 from tqdm import tqdm
 from geometry import GeometricModel
-from adversarial_attack import AdversarialAttack, StandardTwoStepSpectralAttack, OneStepSpectralAttack
+from adversarial_attack import AdversarialAttack, TwoStepSpectralAttack, OneStepSpectralAttack
 from typing import Tuple, Union
 from matplotlib import cm
 from matplotlib.colors import SymLogNorm
@@ -62,6 +63,8 @@ def compare_inf_norm(
     budget_range: Union[torch.Tensor, Tuple[float, float]]=(1., 1e-2),
     savepath: str="./output/infinity_norm_compared",
     attack_vectors: list[list[torch.Tensor]]=None,
+    plot_inf_chart: bool=False,
+    restrict_to_class: int=None,
     ) -> None:
     """Save the plot of the infinity norm with respect to the euclidean budget.
 
@@ -72,7 +75,8 @@ def compare_inf_norm(
         end (int, optional): max budget. Defaults to 1.
         savepath (str, optional): Path to save the plot to. Defaults to "./output/infty_norm".
         attack_vectors: precomputed attack vetors for each adversarial attack classes.
-
+        plot_inf_chart: Plot also the chart of the infinity norm wrt the budget.
+        restrict_to_class: Only choose amoung the class [restrict_to_class].
     Returns:
         _type_: None
     """
@@ -80,6 +84,9 @@ def compare_inf_norm(
     if not torch.is_tensor(budget_range):
         end, step = budget_range
         budget_range = torch.arange(0, end, step).cpu()
+    
+    if restrict_to_class is not None:
+        savepath = f'{savepath}_class={restrict_to_class}'
     
     if attack_vectors is None:
         attack_vectors = []
@@ -89,6 +96,9 @@ def compare_inf_norm(
     for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
         for budget_idx in range(0, len(budget_range), 10):
             infty_norms = torch.linalg.vector_norm(attack_vec[budget_idx].reshape(attack_vec[budget_idx].shape[0], -1), ord=float('inf'), dim=1)
+            if restrict_to_class is not None:
+                not_class = torch.where(attack.proba(test_points).argmax(dim=1) != restrict_to_class)
+                infty_norms[not_class] = 0.
             imax = infty_norms.argmax(dim=0)
 
             figure, axes = plt.subplots(1, 3)
@@ -116,17 +126,18 @@ def compare_inf_norm(
             # plt.show()
             figure.clf()
 
-    # for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
-    #     inf_norm = [torch.linalg.vector_norm(av, ord=float('inf'), dim=1).max().cpu().detach() for av in attack_vec]
-    #     plt.plot(budget_range, inf_norm, label=type(attack).__name__)
-    #     torch.save((budget_range, inf_norm), savepath + '_budget-infnorm.pt')
+    if plot_inf_chart:
+        for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
+            inf_norm = [torch.linalg.vector_norm(av, ord=float('inf'), dim=1).max().cpu().detach() for av in attack_vec]
+            plt.plot(budget_range, inf_norm, label=type(attack).__name__)
+            torch.save((budget_range, inf_norm), savepath + '_budget-infnorm.pt')
 
-    # plt.xlabel("Budget")
-    # plt.ylabel("Infinity norm")
-    # plt.legend()
-    # plt.savefig(savepath + '.pdf', format='pdf')
-    # # plt.show()
-    # plt.clf()
+        plt.xlabel("Budget")
+        plt.ylabel("Infinity norm")
+        plt.legend()
+        plt.savefig(savepath + '.pdf', format='pdf')
+        # plt.show()
+        plt.clf()
 
 def plot_attack(
     adversarial_attack: AdversarialAttack,
@@ -139,13 +150,13 @@ def test_points_2D(nb_points, size=1):
     """Generate test points uniformly in the square [0.5-size/2, 0.5+size/2]^2."""
     return (torch.rand(nb_points, 2) - 0.5)* size + 0.5
 
-def plot_attacks_2D(adversarial_attack, test_points, budget=0.3):
+def plot_attacks_2D(adversarial_attack, test_points, budget=0.3, color='blue'):
     """Plots the attack vectors on the input space."""        
     adversarial_attack.task = "xor"
     attack_vectors = adversarial_attack.compute_attack(test_points, budget) - test_points
     attack_vectors = attack_vectors.detach()
     for coords, attack_vector in tqdm(zip(test_points, attack_vectors)):
-        plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2)
+        plt.quiver(coords[0], coords[1], attack_vector[0], attack_vector[1], width=0.003, scale_units='xy', angles='xy', scale=1, zorder=2, color=color, label=f'{type(adversarial_attack).__name__}')
     if adversarial_attack.task == "xor":
         plt.plot([0, 1], [0, 1], "ro", zorder=3)
         plt.plot([0, 1], [1, 0], "go", zorder=3)
@@ -154,9 +165,9 @@ def plot_attacks_2D(adversarial_attack, test_points, budget=0.3):
         plt.plot([0, 1, 1], [1, 0, 1], "go", zorder=3)
     plt.xlim([-0.1, 1.1])
     plt.ylim([-0.1, 1.1])
-    savepath = "./output/attacks_svd_{}_{}".format(type(adversarial_attack).__name__, adversarial_attack.task)
-    plt.savefig(savepath + '.pdf', format='pdf')
-    plt.clf()
+    # savepath = "./output/attacks_svd_{}_{}".format(type(adversarial_attack).__name__, adversarial_attack.task)
+    # plt.savefig(savepath + '.pdf', format='pdf')
+    # plt.clf()
 
 def plot_curvature_2D(adversarial_attack):
     """Plot the extrinsic curvature for a 2D input manifold and 1D leaves.
@@ -188,7 +199,7 @@ def plot_curvature_2D(adversarial_attack):
     normal_sign = adversarial_attack.attack_sign(grid, normal)
     normal = torch.einsum('z, z... -> z...', normal_sign, normal)
 
-    dx = 1e-3 * normal
+    dx = 1e-6 * normal
     print(f"grid: {grid.shape} and dx: {dx.shape}")
     print(f"grid + dx: {(grid+dx).shape}")
     G_dx = adversarial_attack.local_data_matrix(grid + dx)
@@ -217,10 +228,13 @@ def plot_curvature_2D(adversarial_attack):
 
     # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
     # ax.plot_surface(X, Y, dtheta.detach(), cmap=cm.Blues)
+    # plt.show()
+    # plt.clf()
 
     """2D color plot"""
     dtheta = dtheta.reshape((*xs.shape, *xs.shape)).detach()
-    plt.pcolormesh(xs, xs, dtheta, cmap='PRGn')
+    plt.pcolormesh(xs, xs, dtheta, cmap='PRGn', norm=SymLogNorm(1e-6))
+    # plt.pcolormesh(xs, xs, dtheta, cmap='PRGn', vmin=-dtheta.abs().max(), vmax=dtheta.abs().max())
     plt.colorbar()
 
-    plt.show()
+    # plt.show()
