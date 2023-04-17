@@ -63,7 +63,7 @@ class Foliation(GeometricModel):
             for y0 in tqdm(initial_coordinates):
                 try:
                     leaves = self.compute_leaf(y0, transverse=transverse)
-                    plt.plot(leaves[0], leaves[1], "b-", zorder=1)
+                    plt.plot(leaves[0], leaves[1], ":", color='blue', zorder=1)
                 except ValueError:
                     J = self.jac_proba(torch.tensor(y0).float().unsqueeze(0)).squeeze(0).detach()
                     print(f'Failed with {y0} and \njacobian {J}')
