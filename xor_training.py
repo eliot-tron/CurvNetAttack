@@ -13,7 +13,7 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
 from xor_datasets import XorDataset
-from xor_networks import xor_net
+from xor_networks import xor_net, xor_net_old
 
 
 def train_epoch(
@@ -109,6 +109,11 @@ if __name__ == "__main__":
         default="checkpoint",
         help="Model checkpoint output directory",
     )
+    parser.add_argument(
+        "--old",
+        action="store_true",
+        help="Train the older version of XorNet."
+    )
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -123,7 +128,12 @@ if __name__ == "__main__":
         non_linearity = nn.Sigmoid()
     elif args.activation.lower() == "relu":
         non_linearity = nn.ReLU()
-    model = xor_net(non_linearity=non_linearity) 
+    if args.old:
+        model = xor_net_old(
+            non_linearity=non_linearity
+        )
+    else:
+        model = xor_net(non_linearity=non_linearity) 
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
     train_loader = xor_loader(args.batch_size, train=True)
@@ -136,6 +146,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"xor_net_{args.activation.lower()}_{epoch + 1:02d}.pt")
+        torch.save(model.state_dict(), output_dir / f"xor_net{'_old' if args.old else ''}_{args.activation.lower()}_{epoch + 1:02d}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)
