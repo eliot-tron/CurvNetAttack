@@ -86,7 +86,7 @@ class AdversarialAttack(GeometricModel):
         del attack_vectors
     
 
-class StandardTwoStepSpectralAttack(AdversarialAttack):
+class TwoStepSpectralAttack(AdversarialAttack):
     """Class to compute the two-step spectral attack in
     standard coordinates, and analyse it."""
 
