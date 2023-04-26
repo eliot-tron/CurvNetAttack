@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Tron
+    given-names: Eliot
+    orcid: 0000-0002-6988-7450
+title: "XorNetFol"
+version: 1.0.0
+date-released: 2023
