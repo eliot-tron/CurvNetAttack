@@ -38,7 +38,7 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="fooling-rates",
-        choices=['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'plot-leaves', 'plot-curvature', 'inf-norm', 'save-attacks'],
+        choices=['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'plot-leaves', 'plot-curvature', 'plot-contour','inf-norm', 'save-attacks'],
         help="Task."
     )
     parser.add_argument(
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         MAX_BUDGET = 0.5
         STEP_BUDGET = 0.005
     
-    if task == "plot-curvature" and dataset_name[:3] != 'XOR':
+    if task in ["plot-curvature", "plot-contour"] and dataset_name[:3] != 'XOR':
         raise ValueError(f'Plot curvature requires a 2D dataset and not {dataset_name}.')
 
     if dataset_name == "MNIST":
@@ -359,10 +359,10 @@ if __name__ == "__main__":
         plot_contour_2D(TSSA)
         plt.xlim(0., 1.)
         plt.ylim(0., 1.)
-        savename = f"plot_contour_nl={non_linearity}"
+        savename = f"plot_curvature_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + f'.pdf', dpi=None, transparent=True)
-        # plt.show()
+        plt.show()
     
     # num_samples = 1
     # TSSA.test_jac_proba(input_points)
