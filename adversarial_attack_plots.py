@@ -169,19 +169,38 @@ def plot_attacks_2D(adversarial_attack, test_points, budget=0.3, color='blue'):
     # plt.savefig(savepath + '.pdf', format='pdf')
     # plt.clf()
 
+
+def plot_contour_2D(adversarial_attack):
+    """Plot the contour of the neural network for a 2D input manifold and 1D leaves.
+
+    Args:
+        adversarial_attack (_type_): neural network.
+    """
+    adversarial_attack.network = adversarial_attack.network.to(torch.double)
+    xs = torch.linspace(0, 1, steps=100).double()
+    grid = torch.cartesian_prod(xs, xs)
+    # p = adversarial_attack.proba(grid)[..., 1]
+    # p = p.reshape((*xs.shape, *xs.shape))
+    # plt.pcolormesh(xs, xs, p.detach().numpy()) 
+    # plt.colorbar()
+    # plt.plot()
+    p, p_indices = adversarial_attack.proba(grid).min(dim=-1)
+    p = p.reshape((*xs.shape, *xs.shape))
+    p_indices = p_indices.reshape((*xs.shape, *xs.shape))
+    p[p_indices == 0] = - p[p_indices == 0]
+    levels = torch.cat((-torch.logspace(int((-p[p_indices == 0]).min().log()), 0, 40), torch.logspace(int(p[p_indices == 1].min().log()), 0, 40))).sort().values
+    cmap = cm.get_cmap('Spectral')
+    # plt.contour(xs, xs, p.detach().numpy(), levels=levels, cmap=cmap, norm=SymLogNorm(float(p.abs().min()), float(p.abs().max()))) #, norm='symlog', vmin=-1, vmax=1)
+    plt.contour(xs, xs, 1 / p.detach().numpy(), levels=(1 / levels).sort().values, cmap=cmap, norm='symlog') #, norm='symlog', vmin=-1, vmax=1)
+    # plt.show()
+
+
 def plot_curvature_2D(adversarial_attack):
     """Plot the extrinsic curvature for a 2D input manifold and 1D leaves.
     """
-
-    xs = torch.linspace(0, 1, steps=100)
+    adversarial_attack.network = adversarial_attack.network.to(torch.double)
+    xs = torch.linspace(0, 1, steps=100).double()
     grid = torch.cartesian_prod(xs, xs)
-    p = adversarial_attack.proba(grid)[..., 1]
-    p = p.reshape((*xs.shape, *xs.shape))
-    plt.pcolormesh(xs, xs, p.detach().numpy()) 
-    # levels = torch.logspace(-16, 0, 20)
-    # plt.contour(xs, xs, p.detach().numpy(), levels=levels)
-    plt.colorbar()
-    plt.show()
 
     G_1 = adversarial_attack.local_data_matrix(grid)
     if G_1.is_cuda:

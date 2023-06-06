@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from adversarial_attack import (OneStepSpectralAttack,
                                 TwoStepSpectralAttack)
-from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_curvature_2D
+from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_contour_2D, plot_curvature_2D
 from mnist_networks import medium_cnn
 from xor_networks import xor_net, xor_net_old
 from xor_datasets import XorDataset
@@ -353,7 +353,16 @@ if __name__ == "__main__":
         savename = f"plot_curvature_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + f'.pdf', dpi=None, transparent=True)
-        plt.show()
+        # plt.show()
+    
+    if task == "plot-contour":
+        plot_contour_2D(TSSA)
+        plt.xlim(0., 1.)
+        plt.ylim(0., 1.)
+        savename = f"plot_contour_nl={non_linearity}"
+        savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
+        plt.savefig(savepath + f'.pdf', dpi=None, transparent=True)
+        # plt.show()
     
     # num_samples = 1
     # TSSA.test_jac_proba(input_points)
