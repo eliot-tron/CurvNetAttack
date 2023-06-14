@@ -1,11 +1,7 @@
 """Module implementing various plot functions for comparing attacks."""
-from locale import normalize
 import matplotlib.pyplot as plt
-from numpy import save
 import torch
-from torch import nn
 from tqdm import tqdm
-from geometry import GeometricModel
 from adversarial_attack import AdversarialAttack, TwoStepSpectralAttack, OneStepSpectralAttack
 from typing import Tuple, Union
 from matplotlib import cm
