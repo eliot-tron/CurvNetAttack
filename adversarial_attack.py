@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 from geometry import GeometricModel
-
+from autoattack import AutoAttack
 
 class AdversarialAttack(GeometricModel):
     """Class to represent a general adversarial attack
@@ -220,3 +220,16 @@ class OneStepSpectralAttack(AdversarialAttack):
             attack_vectors.append(perturbation)
         torch.save((budget_range, test_points, attack_vectors), savepath + f'_{type(self).__name__}_budget-points-attack.pt')
         del attack_vectors
+
+        
+
+class AdversarialAutoAttack(AdversarialAttack):
+    """Auto Attack designed by ... with the AutoAttack Package
+
+    """
+
+    def compute_attack(self, input_sample, budget, *args, **kwargs):
+        adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='standard', device=self.device, verbose=False)
+        labels = torch.argmax(self.network(input_sample), dim=-1)
+        x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=1) 
+        return x_adv

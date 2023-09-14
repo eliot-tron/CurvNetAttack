@@ -7,7 +7,7 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
-from adversarial_attack import (OneStepSpectralAttack,
+from adversarial_attack import (AdversarialAutoAttack, OneStepSpectralAttack,
                                 TwoStepSpectralAttack)
 from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_contour_2D, plot_curvature_2D
 from mnist_networks import medium_cnn
@@ -112,6 +112,7 @@ if __name__ == "__main__":
         torch.manual_seed(seed)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
+        
 
     if dataset_name == "MNIST":
         MAX_BUDGET = 10
@@ -198,6 +199,11 @@ if __name__ == "__main__":
                 network=network,
                 network_score=network_score,
             )
+    
+    AA = AdversarialAutoAttack(
+                network=network,
+                network_score=network_score,
+    )
         
     print("attacks created")
     
@@ -267,6 +273,11 @@ if __name__ == "__main__":
 
         plt.matshow(two_step_attack.detach().numpy()[0][0] - one_step_attack.detach().numpy()[0][0])
         plt.show()
+        
+
+        auto_attack = AA.compute_attack(input_points, budget=1)
+        plt.matshow(input_points[0][0] - auto_attack.detach().numpy()[0][0])
+        plt.show()
     
     
     if task == "save-attacks":
@@ -292,6 +303,12 @@ if __name__ == "__main__":
                 budget_max=MAX_BUDGET,
                 savepath=savepath + f"_batch={batch_index}"
             )
+            AA.save_attack(
+                test_points=batch,
+                budget_step=STEP_BUDGET,
+                budget_max=MAX_BUDGET,
+                savepath=savepath + f"_batch={batch_index}"
+            )
             torch.cuda.empty_cache()
     
     if task == "fooling-rates":
@@ -306,7 +323,7 @@ if __name__ == "__main__":
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             compare_fooling_rates(
-                [TSSA, OSSA],
+                [TSSA, OSSA, AA],
                 batch,
                 budget_range=budget_range,
                 savepath=savepath + f"_batch={batch_index}" + (f"I={xor_data_range}" if dataset_name == 'XOR' else ""),
@@ -325,7 +342,7 @@ if __name__ == "__main__":
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             compare_inf_norm(
-                [TSSA, OSSA],
+                [TSSA, OSSA, AA],
                 batch,
                 budget_range=budget_range,
                 savepath=savepath,
