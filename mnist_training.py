@@ -93,7 +93,9 @@ def mnist_loader(batch_size: int, train: bool) -> DataLoader:
             train=train,
             download=False,
             transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+                    [transforms.ToTensor(),
+                     # transforms.Normalize((0.1307,), (0.3081,))
+                     ]
             ),
         ),
         batch_size=batch_size,
@@ -110,7 +112,9 @@ def emnist_loader(batch_size: int, train: bool) -> DataLoader:
                 download=False,
                 split='letters',
                 transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+                    [transforms.ToTensor(),
+                     # transforms.Normalize((0.1307,), (0.3081,))
+                     ]
                 ),
         )
     loader = torch.utils.data.DataLoader(
@@ -133,7 +137,9 @@ def exemplar_batch(batch_size: int, train: bool) -> torch.Tensor:
         train=train,
         download=False,
         transform=transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+            [transforms.ToTensor()
+             #, transforms.Normalize((0.1307,), (0.3081,))
+             ]
         ),
     )
     examples = []

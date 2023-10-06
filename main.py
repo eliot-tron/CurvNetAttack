@@ -134,13 +134,15 @@ if __name__ == "__main__":
         network = medium_cnn(checkpoint_path, non_linearity=non_linearity)
         network_score = medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
 
-        normalize = transforms.Normalize((0.1307,), (0.3081,))
+        # normalize = transforms.Normalize((0.1307,), (0.3081,))
 
         input_space = datasets.MNIST(
             "data",
             train=False,  # TODO: True ?
             download=True,
-            transform=transforms.Compose([transforms.ToTensor(), normalize]),
+            transform=transforms.Compose([transforms.ToTensor()
+                                          # , normalize
+                                        ]),
         )
     elif dataset_name == "XOR":
         if non_linearity == 'Sigmoid':
