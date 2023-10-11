@@ -237,6 +237,27 @@ class AdversarialAutoAttack(AdversarialAttack):
         :returns: attacked point as a torch tensor (bs, d)
 
         """
+        # adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='custom', attacks_to_run=['apgd-ce'], device=self.device, verbose=False)
+        adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='standard', device=self.device, verbose=False)
+        labels = torch.argmax(self.proba(input_sample), dim=-1)
+        x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=250) 
+        return x_adv
+
+
+class APGDAttack(AdversarialAttack):
+    """Auto Attack designed by ... with the AutoAttack Package
+
+    """
+
+    def compute_attack(self, input_sample, budget, *args, **kwargs):
+        """Compute the attack on a point [input_sample]
+        with a euclidean size given by [budget].
+
+        :input_sample: torch tensor (bs, d)
+        :budget: positive real number
+        :returns: attacked point as a torch tensor (bs, d)
+
+        """
         adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='custom', attacks_to_run=['apgd-ce'], device=self.device, verbose=False)
         labels = torch.argmax(self.proba(input_sample), dim=-1)
         x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=250) 
