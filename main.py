@@ -111,6 +111,8 @@ if __name__ == "__main__":
 
     batch_size = 125
     savedirectory = args.savedirectory + ("" if args.savedirectory[-1] == '/' else '/') + f"{dataset_name}/{task}/"
+    if task.casefold() in ['plot-attack', 'plot-attacks-2D', 'fooling-rates', 'inf-norm'] :
+        savedirectory += '-'.join(sorted(attacks_to_run_str)).casefold() + '/'
     if not path.isdir(savedirectory):
         makedirs(savedirectory)
 
@@ -233,7 +235,7 @@ if __name__ == "__main__":
             )
             attacks_to_run.append(APGD)
         
-    print(f"attacks created: {[a.__name__ for a in attacks_to_run]}")
+    print(f"attacks created: {[type(a).__name__ for a in attacks_to_run]}")
     
     foliation = Foliation(
         network=network,
@@ -314,7 +316,6 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
     
     if task == "fooling-rates":
-        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
@@ -334,7 +335,6 @@ if __name__ == "__main__":
             )
 
     if task == "inf-norm":
-        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"inf_norm_compared_nsample={num_samples}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
@@ -363,7 +363,6 @@ if __name__ == "__main__":
             plot_attacks_2D(adversarial_attack, test_points=input_points,budget=0.1, color=colors_dict[name.casefold()])
             # foliation.plot(eigenvectors=False)
             # plt.legend()
-        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"plot_attacks_2D_budget=1e-1_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + '.pdf', format='pdf')
