@@ -1,4 +1,5 @@
 import argparse
+from ctypes import ArgumentError
 from os import makedirs, path
 import random
 import numpy as np
@@ -7,7 +8,7 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
-from adversarial_attack import (AdversarialAutoAttack, OneStepSpectralAttack,
+from adversarial_attack import (APGDAttack, AdversarialAutoAttack, OneStepSpectralAttack,
                                 TwoStepSpectralAttack)
 from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_contour_2D, plot_curvature_2D
 from mnist_networks import medium_cnn
@@ -61,6 +62,15 @@ if __name__ == "__main__":
         help="Permutes randomly the inputs."
     )
     parser.add_argument(
+        "--run",
+        type=str,
+        metavar="attack",
+        nargs="+",
+        default=["TSSA", "OSSA"],
+        choices=["TSSA", "OSSA", "AA", "APGD"],
+        help="List of attacks to run on the task."
+    )
+    parser.add_argument(
         "--attacks",
         type=str,
         metavar="path",
@@ -95,8 +105,10 @@ if __name__ == "__main__":
     task = args.task
     non_linearity = args.nl
     start_index = args.startidx
+    attacks_to_run_str = args.run
     attack_paths = args.attacks
     xor_data_range = args.range
+
     batch_size = 125
     savedirectory = args.savedirectory + ("" if args.savedirectory[-1] == '/' else '/') + f"{dataset_name}/{task}/"
     if not path.isdir(savedirectory):
@@ -115,7 +127,7 @@ if __name__ == "__main__":
         
 
     if dataset_name == "MNIST":
-        MAX_BUDGET = 10
+        MAX_BUDGET = 6
         STEP_BUDGET = 0.1
     elif dataset_name[:3] == "XOR":
         MAX_BUDGET = 0.5
@@ -126,7 +138,7 @@ if __name__ == "__main__":
 
     if dataset_name == "MNIST":
         if non_linearity == 'Sigmoid':
-            checkpoint_path = './checkpoint/medium_cnn_10_Sigmoid.pt'
+            checkpoint_path = './checkpoint/medium_cnn_30_Sigmoid.pt'
             non_linearity = nn.Sigmoid()
         elif non_linearity == 'ReLU':
             checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
@@ -193,21 +205,35 @@ if __name__ == "__main__":
 
     print(f"network to {device} done")
 
-    TSSA = TwoStepSpectralAttack(
-                network=network,
-                network_score=network_score,
+    attacks_to_run = []
+
+    for attack_name in attacks_to_run_str:
+        if attack_name.casefold() == 'tssa':
+            TSSA = TwoStepSpectralAttack(
+                    network=network,
+                    network_score=network_score,
+                )
+            attacks_to_run.append(TSSA)
+        if attack_name.casefold() == 'ossa':
+            OSSA = OneStepSpectralAttack(
+                        network=network,
+                        network_score=network_score,
+                    )
+            attacks_to_run.append(OSSA)
+        if attack_name.casefold() == 'aa':
+            AA = AdversarialAutoAttack(
+                        network=network,
+                        network_score=network_score,
             )
-    OSSA = OneStepSpectralAttack(
-                network=network,
-                network_score=network_score,
+            attacks_to_run.append(AA)
+        if attack_name.casefold() == 'apgd':
+            APGD = APGDAttack(
+                        network=network,
+                        network_score=network_score,
             )
-    
-    AA = AdversarialAutoAttack(
-                network=network,
-                network_score=network_score,
-    )
+            attacks_to_run.append(APGD)
         
-    print("attacks created")
+    print(f"attacks created: {[a.__name__ for a in attacks_to_run]}")
     
     foliation = Foliation(
         network=network,
@@ -262,25 +288,10 @@ if __name__ == "__main__":
     if task == "plot-attack":
         plt.matshow(input_points[0][0])
         plt.show()
-        two_step_attack = TSSA.compute_attack(input_points, budget=1)
-        plt.matshow(input_points[0][0] - two_step_attack.detach().numpy()[0][0])
-        plt.show()
-        one_step_attack = OSSA.compute_attack(
-                                input_points,
-                                budget=1
-                            )
-
-        plt.matshow(input_points[0][0] - one_step_attack.detach().numpy()[0][0])
-        plt.show()
-
-        plt.matshow(two_step_attack.detach().numpy()[0][0] - one_step_attack.detach().numpy()[0][0])
-        plt.show()
-        
-
-        auto_attack = AA.compute_attack(input_points, budget=1)
-        plt.matshow(input_points[0][0] - auto_attack.detach().numpy()[0][0])
-        plt.show()
-    
+        for adversarial_attack in attacks_to_run:
+            attack_output = adversarial_attack.compute_attack(input_points, budget=1)
+            plt.matshow(input_points[0][0] - attack_output.detach().numpy()[0][0])
+            plt.show()
     
     if task == "save-attacks":
         savename = f"attacks_nsample={num_samples}_start={start_index}"
@@ -293,27 +304,17 @@ if __name__ == "__main__":
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
-            TSSA.save_attack(
-                test_points=batch,
-                budget_step=STEP_BUDGET,
-                budget_max=MAX_BUDGET,
-                savepath=savepath + f"_batch={batch_index}"
-            )
-            OSSA.save_attack(
-                test_points=batch,
-                budget_step=STEP_BUDGET,
-                budget_max=MAX_BUDGET,
-                savepath=savepath + f"_batch={batch_index}"
-            )
-            AA.save_attack(
-                test_points=batch,
-                budget_step=STEP_BUDGET,
-                budget_max=MAX_BUDGET,
-                savepath=savepath + f"_batch={batch_index}"
-            )
+            for adversarial_attack in attacks_to_run:
+                adversarial_attack.save_attack(
+                    test_points=batch,
+                    budget_step=STEP_BUDGET,
+                    budget_max=MAX_BUDGET,
+                    savepath=savepath + f"_batch={batch_index}"
+                )
             torch.cuda.empty_cache()
     
     if task == "fooling-rates":
+        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
@@ -325,7 +326,7 @@ if __name__ == "__main__":
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             compare_fooling_rates(
-                [TSSA, OSSA, AA],
+                attacks_to_run,
                 batch,
                 budget_range=budget_range,
                 savepath=savepath + f"_batch={batch_index}" + (f"I={xor_data_range}" if dataset_name == 'XOR' else ""),
@@ -333,6 +334,7 @@ if __name__ == "__main__":
             )
 
     if task == "inf-norm":
+        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"inf_norm_compared_nsample={num_samples}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
@@ -344,7 +346,7 @@ if __name__ == "__main__":
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             compare_inf_norm(
-                [TSSA, OSSA, AA],
+                attacks_to_run,
                 batch,
                 budget_range=budget_range,
                 savepath=savepath,
@@ -352,11 +354,16 @@ if __name__ == "__main__":
             )
 
     if task == "plot-attacks-2D":
+        colors_dict = {'tssa': 'blue',
+                       'ossa': 'orange',
+                       'aa': 'red',
+                       'apdg': 'green'}
         foliation.plot(eigenvectors=False)
-        plot_attacks_2D(TSSA, test_points=input_points,budget=0.1, color='blue')
-        # foliation.plot(eigenvectors=False)
-        plot_attacks_2D(OSSA, test_points=input_points, budget=0.1, color='orange')
-        # plt.legend()
+        for name, adversarial_attack in zip(attacks_to_run_str, attacks_to_run):
+            plot_attacks_2D(adversarial_attack, test_points=input_points,budget=0.1, color=colors_dict[name.casefold()])
+            # foliation.plot(eigenvectors=False)
+            # plt.legend()
+        savedirectory += ("" if savedirectory[-1] == "/" else "/") + '-'.join(sorted(attacks_to_run_str)).casefold()
         savename = f"plot_attacks_2D_budget=1e-1_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + '.pdf', format='pdf')
@@ -365,7 +372,7 @@ if __name__ == "__main__":
         foliation.plot(eigenvectors=False)
     
     if task == "plot-curvature":
-        plot_curvature_2D(TSSA)
+        plot_curvature_2D(attacks_to_run[0])
         foliation.plot(eigenvectors=False, transverse=True)
         plt.xlim(0., 1.)
         plt.ylim(0., 1.)
@@ -375,7 +382,7 @@ if __name__ == "__main__":
         # plt.show()
     
     if task == "plot-contour":
-        plot_contour_2D(TSSA)
+        plot_contour_2D(attacks_to_run[0])
         plt.xlim(0., 1.)
         plt.ylim(0., 1.)
         savename = f"plot_curvature_nl={non_linearity}"
