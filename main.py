@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from adversarial_attack import (APGDAttack, AdversarialAutoAttack, OneStepSpectralAttack,
                                 TwoStepSpectralAttack)
 from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_contour_2D, plot_curvature_2D
-from mnist_networks import medium_cnn
+import mnist_networks, cifar_networks
 from xor_networks import xor_net, xor_net_old
 from xor_datasets import XorDataset
 from foliation import Foliation
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         default="MNIST",
-        choices=['MNIST', 'XOR', 'XOR-old'],
+        choices=['MNIST', 'XOR', 'XOR-old', 'CIFAR10'],
         help="Dataset name to be used.",
     )
     parser.add_argument(
@@ -131,6 +131,9 @@ if __name__ == "__main__":
     if dataset_name == "MNIST":
         MAX_BUDGET = 6
         STEP_BUDGET = 0.1
+    elif dataset_name == "CIFAR10":
+        MAX_BUDGET = 6
+        STEP_BUDGET = 0.1
     elif dataset_name[:3] == "XOR":
         MAX_BUDGET = 0.5
         STEP_BUDGET = 0.005
@@ -145,8 +148,8 @@ if __name__ == "__main__":
         elif non_linearity == 'ReLU':
             checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
             non_linearity = nn.ReLU()
-        network = medium_cnn(checkpoint_path, non_linearity=non_linearity)
-        network_score = medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
+        network = mnist_networks.medium_cnn(checkpoint_path, non_linearity=non_linearity)
+        network_score = mnist_networks.medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
 
         # normalize = transforms.Normalize((0.1307,), (0.3081,))
 
@@ -157,6 +160,26 @@ if __name__ == "__main__":
             transform=transforms.Compose([transforms.ToTensor()
                                           # , normalize
                                         ]),
+        )
+    elif dataset_name == 'CIFAR10':
+        if non_linearity == 'Sigmoid':
+            checkpoint_path = './checkpoint/VGG11-lr=0.05/cifar10_medium_cnn_30_Sigmoid.pt'
+            non_linearity = nn.Sigmoid()
+        elif non_linearity == 'ReLU':
+            checkpoint_path = './checkpoint/VGG11-lr=0.05/cifar10_medium_cnn_30_ReLU.pt'
+            non_linearity = nn.ReLU()
+        network = cifar_networks.medium_cnn(checkpoint_path, non_linearity=non_linearity)
+        network_score = cifar_networks.medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
+
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             ])
+
+        input_space = datasets.CIFAR10(
+            "data",
+            train=False,
+            download=True,
+            transform=transform,
         )
     elif dataset_name == "XOR":
         if non_linearity == 'Sigmoid':
@@ -292,7 +315,7 @@ if __name__ == "__main__":
         plt.show()
         for adversarial_attack in attacks_to_run:
             attack_output = adversarial_attack.compute_attack(input_points, budget=1)
-            plt.matshow(input_points[0][0] - attack_output.detach().numpy()[0][0])
+            plt.matshow(attack_output.detach().numpy()[0][0])
             plt.show()
     
     if task == "save-attacks":
