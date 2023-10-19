@@ -94,10 +94,17 @@ if __name__ == "__main__":
         help="Path to the directory to save the outputs in."
     )
     
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="Force device to be cpu, even if cuda is available."
+    )
+    
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = torch.device('cpu')
+    if args.cpu:
+        device = torch.device('cpu')
     print(f"Device: {device}")
     
     dataset_name = args.dataset
@@ -132,8 +139,8 @@ if __name__ == "__main__":
         MAX_BUDGET = 6
         STEP_BUDGET = 0.1
     elif dataset_name == "CIFAR10":
-        MAX_BUDGET = 6
-        STEP_BUDGET = 0.1
+        MAX_BUDGET = 2
+        STEP_BUDGET = 0.05
     elif dataset_name[:3] == "XOR":
         MAX_BUDGET = 0.5
         STEP_BUDGET = 0.005
@@ -163,10 +170,11 @@ if __name__ == "__main__":
         )
     elif dataset_name == 'CIFAR10':
         if non_linearity == 'Sigmoid':
-            checkpoint_path = './checkpoint/VGG11-lr=0.05/cifar10_medium_cnn_30_Sigmoid.pt'
+            raise NotImplemented
+            checkpoint_path = './checkpoint/VGG11-lr=0.1/cifar10_medium_cnn_30_Sigmoid.pt'
             non_linearity = nn.Sigmoid()
         elif non_linearity == 'ReLU':
-            checkpoint_path = './checkpoint/VGG11-lr=0.05/cifar10_medium_cnn_30_ReLU.pt'
+            checkpoint_path = './checkpoint/VGG11-lr=0.1/cifar10_medium_cnn_30_ReLU.pt'
             non_linearity = nn.ReLU()
         network = cifar_networks.medium_cnn(checkpoint_path, non_linearity=non_linearity)
         network_score = cifar_networks.medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
@@ -324,8 +332,11 @@ if __name__ == "__main__":
 
         if device.type == 'cuda':
             batched_input_points = torch.split(input_points, batch_size , dim=0)
-        else: # enough memory in cpu for a single batch
+        elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
+        else:
+            batch_size = 200
+            batched_input_points = torch.split(input_points, batch_size, dim=0)
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
@@ -344,8 +355,11 @@ if __name__ == "__main__":
 
         if device.type == 'cuda' and attack_paths is None:
             batched_input_points = torch.split(input_points, batch_size , dim=0)
-        else: # enough memory in cpu for a single batch
+        elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
+        else:
+            batch_size = 200
+            batched_input_points = torch.split(input_points, batch_size, dim=0)
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
