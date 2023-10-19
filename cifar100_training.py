@@ -92,7 +92,7 @@ def cifar100_loader(batch_size: int, train: bool) -> DataLoader:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train a basic model on CIFAR10",
+        description="Train a basic model on CIFAR100",
         usage="python3 mnist_training.py [--batch-size BATCH-SIZE "
         "--epochs EPOCHS --lr LR --seed SEED --output-dir OUTPUT-DIR]",
     )
@@ -106,6 +106,22 @@ if __name__ == "__main__":
         default="checkpoint",
         help="Model checkpoint output directory",
     )
+    parser.add_argument(
+        "--nl",
+        type=str,
+        metavar='f',
+        default="ReLU",
+        choices=['Sigmoid', 'ReLU'],
+        help="Non linearity used by the network."
+    )
+    parser.add_argument(
+        "--vgg",
+        type=str,
+        metavar='f',
+        default="VGG11",
+        choices=['VGG11', 'VGG13', 'VGG16', 'VGG19'],
+        help="Choice of the VGG architecture."
+    )
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -113,16 +129,16 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    non_linearity = 'ReLU'
+    non_linearity = args.nl
     non_linearity_dict = {
         'ReLU': nn.ReLU(),
         'Sigmoid': nn.Sigmoid(),
     }
 
-    output_dir = Path(args.output_dir).expanduser()
+    output_dir = Path(args.output_dir).expanduser() / "CIFAR100" / f"{args.vgg}-lr={args.lr}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = medium_cnn(num_classes=100, non_linearity=non_linearity_dict[non_linearity])
+    model = medium_cnn(num_classes=100, non_linearity=non_linearity_dict[non_linearity], vgg_name=args.vgg)
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
     train_loader = cifar100_loader(args.batch_size, train=True)
@@ -135,6 +151,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"cifar100_medium_cnn_{epoch + 1:02d}_{non_linearity}.pt")
+        torch.save(model.state_dict(), output_dir / f"cifar100_medium_cnn_{args.vgg}_{epoch + 1:02d}_{non_linearity}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)

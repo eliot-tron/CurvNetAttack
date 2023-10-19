@@ -135,7 +135,7 @@ if __name__ == "__main__":
         'Sigmoid': nn.Sigmoid(),
     }
 
-    output_dir = Path(args.output_dir).expanduser()
+    output_dir = Path(args.output_dir).expanduser() / "CIFAR10" / f"{args.vgg}-lr={args.lr}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model = medium_cnn(num_classes=10, non_linearity=non_linearity_dict[non_linearity], vgg_name=args.vgg)
@@ -151,6 +151,6 @@ if __name__ == "__main__":
         )
         global_steps.append(epoch_steps + epoch * len(train_loader))
         test(model, test_loader)
-        torch.save(model.state_dict(), output_dir / f"{args.vgg}-lr={args.lr}" / f"cifar10_medium_cnn_{args.vgg}_{epoch + 1:02d}_{non_linearity}.pt")
+        torch.save(model.state_dict(), output_dir / f"cifar10_medium_cnn_{args.vgg}_{epoch + 1:02d}_{non_linearity}.pt")
 
     global_steps = torch.cat(global_steps, dim=0)

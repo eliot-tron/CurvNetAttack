@@ -11,11 +11,11 @@ cfg = {
 
 
 class VGG(nn.Module):
-    def __init__(self, vgg_name, score:bool=False, non_linearity=nn.ReLU()):
+    def __init__(self, vgg_name, score:bool=False, non_linearity=nn.ReLU(), num_classes: int=10):
         super(VGG, self).__init__()
         self.non_linearity=non_linearity
         self.features = self._make_layers(cfg[vgg_name])
-        self.classifier = nn.Linear(512, 10)
+        self.classifier = nn.Linear(512, num_classes)
         self.softmax = nn.LogSoftmax(dim=1)
         self.score = score
 
@@ -42,7 +42,7 @@ class VGG(nn.Module):
         return nn.Sequential(*layers)
 
 def medium_cnn(checkpoint_path: str = "", num_classes: int=10, score: bool=False, non_linearity=nn.ReLU(), vgg_name='VGG11') -> nn.Module:
-    net = VGG(vgg_name=vgg_name, non_linearity=non_linearity, score=score)
+    net = VGG(vgg_name=vgg_name, non_linearity=non_linearity, score=score, num_classes=num_classes)
     if checkpoint_path:
         net.load_state_dict(torch.load(checkpoint_path, map_location=torch.device('cpu')))
     return net
