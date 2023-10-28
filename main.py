@@ -317,7 +317,6 @@ if __name__ == "__main__":
         input_points = torch.stack([input_space[idx][0] for idx in indices])
         input_points = input_points.to(device)
 
-
     if task == "plot-attack":
         plt.matshow(input_points[0][0])
         plt.show()
@@ -353,7 +352,9 @@ if __name__ == "__main__":
         savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
-        if device.type == 'cuda' and attack_paths is None:
+        if attack_paths is not None:
+            batched_input_points = [input_points]
+        elif device.type == 'cuda':
             batched_input_points = torch.split(input_points, batch_size , dim=0)
         elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
             batched_input_points = [input_points]
@@ -375,10 +376,16 @@ if __name__ == "__main__":
         savename = f"inf_norm_compared_nsample={num_samples}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
-        if device.type == 'cuda':
-            batched_input_points = torch.split(input_points, batch_size , dim=0)
-        else: # enough memory in cpu for a single batch
+        if attack_paths is not None:
             batched_input_points = [input_points]
+        elif device.type == 'cuda':
+            batched_input_points = torch.split(input_points, batch_size , dim=0)
+        elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
+            batched_input_points = [input_points]
+        else:
+            batch_size = 200
+            batched_input_points = torch.split(input_points, batch_size, dim=0)
+
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
