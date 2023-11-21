@@ -3,6 +3,8 @@ import torch
 from torch import nn
 from torch.autograd.functional import jacobian, hessian
 from tqdm import tqdm
+from scipy.integrate import solve_ivp
+from torchdiffeq import odeint_event
 
 
 class GeometricModel(object):
@@ -10,7 +12,7 @@ class GeometricModel(object):
     def __init__(self,
                  network: nn.Module,
                  network_score: nn.Module,
-                 verbose: bool=False,
+                 verbose: bool=True,
     ) -> None:
 
         super(GeometricModel, self).__init__()
@@ -281,3 +283,75 @@ class GeometricModel(object):
         H_grad = self.hessian_gradproba(eval_point)
 
         return H_grad.transpose(-2, -3) + H_grad
+    
+
+    def jac_metric(
+        self,
+        eval_point: torch.Tensor,
+        relu_optim: bool=True,  # Else intractable
+    ) -> torch.Tensor:
+
+        if relu_optim:
+            J_s = self.jac_score(eval_point)
+            J_p = self.jac_proba(eval_point)
+            p = self.proba(eval_point)
+            pdp = torch.einsum("...a, ...bi -> ...iab", p, J_p)  # p_a ∂_i p_b
+            return torch.einsum(
+                        "...ak, ...iab, ...bl -> ...ikl",
+                        J_s, torch.diag_embed(J_p.mT) - pdp - pdp.mT, J_s
+                    )
+        else:
+            def G(x): return self.local_data_matrix(x, create_graph=True)
+            if self.verbose:
+                print(f"shape of eval_point = {eval_point.shape}")
+                print(f"shape of output = {self.proba(eval_point).shape}")
+            jac_metric = jacobian(G, eval_point)
+            if self.verbose: print(f"shape of j before reshape = {jac_metric.shape}")
+            jac_metric = jac_metric.sum(3).flatten(3)  #TODO: to finish indices
+            if self.verbose: print(f"shape of j after reshape = {jac_metric.shape}")
+            return jac_metric
+
+
+    def christoffel(
+        self,
+        eval_point: torch.Tensor,
+    ) -> torch.Tensor:
+        J_G = self.jac_metric(eval_point)
+        G = self.local_data_matrix(eval_point)
+        G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).float() # input need to be in double
+
+        return torch.einsum(
+                    "...kl, ...ijl -> ...ijk",
+                    G_inv, J_G + J_G.permute(0, 2, 1, 3) - J_G.permute(0, 3, 1, 2)
+                ) / 2
+
+    
+
+    def geodesic(
+        self,
+        eval_point: torch.Tensor,
+        init_velocity: torch.Tensor,
+        euclidean_budget: float=None,
+    ) -> torch.Tensor:
+        
+        def ode(t, y):
+            x, v = y[0], y[1].flatten(1)
+            christoffel = self.christoffel(x)
+            return torch.stack((v.reshape(x.shape), torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel).reshape(x.shape)))
+        
+        def euclidean_stop(t, y):
+            if euclidean_budget is None:
+                return nn.ReLU(2. - t)
+            x = y[0]
+            return torch.norm(x - eval_point).pow(2) - euclidean_budget
+        
+        euclidean_stop.terminal = True
+        
+        y0 = torch.stack((eval_point, init_velocity)) # TODO: wrong dim after bash -> should be flatten ?
+            
+        # solution_ivp = solve_ivp(ode, t_span = (0, 2), y0=(eval_point.detach().numpy(), init_velocity.detach().numpy()), method='RK23', events=euclidean_stop if euclidean_budget is not None else None)
+
+        event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 1000)
+
+
+        return solution_ode

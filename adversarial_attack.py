@@ -262,3 +262,31 @@ class APGDAttack(AdversarialAttack):
         labels = torch.argmax(self.proba(input_sample), dim=-1)
         x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=250) 
         return x_adv
+
+
+class GeodesicSpectralAttack(AdversarialAttack):
+    """Adversarial attack computing the true geodesic with initial velocity
+    the eigenvector associated with the highest eigenvalue of the FIM.
+    """
+
+    def compute_attack(self, input_sample, budget, *args, **kwargs):
+        """Compute the attack on a point [input_sample]
+        with a euclidean size given by [budget].
+
+        :input_sample: torch tensor (bs, d)
+        :budget: positive real number
+        :returns: attacked point as a torch tensor (bs, d)
+
+        """
+        G = self.local_data_matrix(input_sample)
+
+        if G.is_cuda:
+            _, _, v = torch.linalg.svd(G)
+            init_speed = v[..., 0, :]  # be careful, it isn't intuitive -> RTD
+        else:
+            _, v = torch.linalg.eigh(G)  # value, vector, in ascending order
+            init_speed = v[..., -1]  # be careful, it isn't intuitive -> RTD
+
+        x_adv = self.geodesic(input_sample, init_speed, budget)
+
+        return x_adv

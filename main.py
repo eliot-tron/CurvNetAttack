@@ -99,7 +99,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Force device to be cpu, even if cuda is available."
     )
-    
+    parser.add_argument(
+        "--double",
+        action="store_true",
+        help="Use double precision (1e-16) for the computations (recommanded)."
+    )
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,6 +119,7 @@ if __name__ == "__main__":
     attacks_to_run_str = args.run
     attack_paths = args.attacks
     xor_data_range = args.range
+    precision_type = torch.double if args.double else torch.float
 
     batch_size = 125
     savedirectory = args.savedirectory + ("" if args.savedirectory[-1] == '/' else '/') + f"{dataset_name}/{task}/"
@@ -153,7 +158,7 @@ if __name__ == "__main__":
             checkpoint_path = './checkpoint/medium_cnn_30_Sigmoid.pt'
             non_linearity = nn.Sigmoid()
         elif non_linearity == 'ReLU':
-            checkpoint_path = './checkpoint/medium_cnn_10_ReLU.pt'
+            checkpoint_path = './checkpoint/medium_cnn_30_ReLU.pt'
             non_linearity = nn.ReLU()
         network = mnist_networks.medium_cnn(checkpoint_path, non_linearity=non_linearity)
         network_score = mnist_networks.medium_cnn(checkpoint_path, score=True, non_linearity=non_linearity)
@@ -233,10 +238,10 @@ if __name__ == "__main__":
         network = nn.DataParallel(network)
         network_score = nn.DataParallel(network_score)
 
-    network = network.to(device)
-    network_score = network_score.to(device)
+    network = network.to(device).to(precision_type)
+    network_score = network_score.to(device).to(precision_type)
 
-    print(f"network to {device} done")
+    print(f"network to {device} as {precision_type} done")
 
     attacks_to_run = []
 
@@ -299,6 +304,7 @@ if __name__ == "__main__":
         budget_range = (MAX_BUDGET, STEP_BUDGET)
         attack_vectors = None
 
+    
     print(f'Task {task} with dataset {dataset_name} and {num_samples} samples.')
 
     # Initialization of the input points
@@ -315,7 +321,12 @@ if __name__ == "__main__":
             indices = range(start_index, start_index + num_samples)
 
         input_points = torch.stack([input_space[idx][0] for idx in indices])
-        input_points = input_points.to(device)
+        input_points = input_points.to(device).to(precision_type)
+
+    # result = TSSA.jac_metric(input_points)
+    geo = TSSA.geodesic(input_points, OSSA.compute_attack(input_points, 1e-1) - input_points, euclidean_budget=1e-1)
+    print(geo)
+    exit()
 
     if task == "plot-attack":
         plt.matshow(input_points[0][0])
@@ -433,5 +444,4 @@ if __name__ == "__main__":
         plt.savefig(savepath + f'.pdf', dpi=None, transparent=True)
         plt.show()
     
-    # num_samples = 1
     # TSSA.test_jac_proba(input_points)
