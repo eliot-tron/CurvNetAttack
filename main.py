@@ -7,8 +7,9 @@ import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
-from adversarial_attack import (APGDAttack, AdversarialAutoAttack, OneStepSpectralAttack,
+from adversarial_attack import (APGDAttack, AdversarialAutoAttack, GeodesicSpectralAttack, OneStepSpectralAttack,
                                 TwoStepSpectralAttack)
 from adversarial_attack_plots import compare_fooling_rates, compare_inf_norm, plot_attacks_2D, plot_contour_2D, plot_curvature_2D
 import mnist_networks, cifar_networks
@@ -67,7 +68,7 @@ if __name__ == "__main__":
         metavar="attack",
         nargs="+",
         default=["TSSA", "OSSA"],
-        choices=["TSSA", "OSSA", "AA", "APGD"],
+        choices=["TSSA", "OSSA", "AA", "APGD", "GSA"],
         help="List of attacks to run on the task."
     )
     parser.add_argument(
@@ -120,6 +121,7 @@ if __name__ == "__main__":
     attack_paths = args.attacks
     xor_data_range = args.range
     precision_type = torch.double if args.double else torch.float
+    # torch.set_default_dtype(precision_type)
 
     batch_size = 125
     savedirectory = args.savedirectory + ("" if args.savedirectory[-1] == '/' else '/') + f"{dataset_name}/{task}/"
@@ -149,6 +151,12 @@ if __name__ == "__main__":
     elif dataset_name[:3] == "XOR":
         MAX_BUDGET = 0.5
         STEP_BUDGET = 0.005
+        
+    if "GSA" in attacks_to_run_str:
+        MAX_BUDGET = 1
+        STEP_BUDGET = 0.2
+        batch_size = 2
+
     
     if task in ["plot-curvature", "plot-contour"] and dataset_name[:3] != 'XOR':
         raise ValueError(f'Plot curvature requires a 2D dataset and not {dataset_name}.')
@@ -270,6 +278,12 @@ if __name__ == "__main__":
                         network_score=network_score,
             )
             attacks_to_run.append(APGD)
+        if attack_name.casefold() == 'gsa':
+            GSA = GeodesicSpectralAttack(
+                        network=network,
+                        network_score=network_score,
+            )
+            attacks_to_run.append(GSA)
         
     print(f"attacks created: {[type(a).__name__ for a in attacks_to_run]}")
     
@@ -286,7 +300,7 @@ if __name__ == "__main__":
         print("Loading precomputed attacks", end='')
         for attack_path in attack_paths:
             print(".", end='')
-            br, ip, av = torch.load(attack_path, map_location=device)
+            br, ip, av = torch.load(attack_path, map_location=device, dtype=precision_type)
             budget_range_list.append(br)
             input_points_list.append(ip)
             attack_vectors.append(av)
@@ -324,9 +338,9 @@ if __name__ == "__main__":
         input_points = input_points.to(device).to(precision_type)
 
     # result = TSSA.jac_metric(input_points)
-    geo = TSSA.geodesic(input_points, OSSA.compute_attack(input_points, 1e-1) - input_points, euclidean_budget=1e-1)
-    print(geo)
-    exit()
+    # geo = TSSA.geodesic(input_points, OSSA.compute_attack(input_points, 1e-1) - input_points, euclidean_budget=1e-1)
+    # print(geo)
+    # exit()
 
     if task == "plot-attack":
         plt.matshow(input_points[0][0])
@@ -335,18 +349,26 @@ if __name__ == "__main__":
             attack_output = adversarial_attack.compute_attack(input_points, budget=1)
             plt.matshow(attack_output.detach().numpy()[0][0])
             plt.show()
-    
-    if task == "save-attacks":
-        savename = f"attacks_nsample={num_samples}_start={start_index}"
-        savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
-
-        if device.type == 'cuda':
+            
+    # We split data or not depending on the ram usage to avoid excess (on our computer)
+    if task in ["save-attacks", "fooling-rates", "inf-norm"]:
+        if attack_paths is not None:
+            print("No batches.")
+            batched_input_points = [input_points]
+        elif (device.type == 'cuda') or ('GSA' in attacks_to_run_str):
+            print(f"Batch of size {batch_size}.")
             batched_input_points = torch.split(input_points, batch_size , dim=0)
         elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
+            print("No batches.")
             batched_input_points = [input_points]
         else:
             batch_size = 200
+            print(f"Batch of size {batch_size}.")
             batched_input_points = torch.split(input_points, batch_size, dim=0)
+
+    if task == "save-attacks":
+        savename = f"attacks_nsample={num_samples}_start={start_index}_nl={non_linearity}"
+        savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
@@ -363,16 +385,6 @@ if __name__ == "__main__":
         savename = f"fooling_rates_compared_nsample={num_samples}_start={start_index}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
 
-        if attack_paths is not None:
-            batched_input_points = [input_points]
-        elif device.type == 'cuda':
-            batched_input_points = torch.split(input_points, batch_size , dim=0)
-        elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
-            batched_input_points = [input_points]
-        else:
-            batch_size = 200
-            batched_input_points = torch.split(input_points, batch_size, dim=0)
-
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             compare_fooling_rates(
@@ -384,19 +396,8 @@ if __name__ == "__main__":
             )
 
     if task == "inf-norm":
-        savename = f"inf_norm_compared_nsample={num_samples}"
+        savename = f"inf_norm_compared_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
-
-        if attack_paths is not None:
-            batched_input_points = [input_points]
-        elif device.type == 'cuda':
-            batched_input_points = torch.split(input_points, batch_size , dim=0)
-        elif dataset_name in ["MNIST", "XOR", "XOR-old"]: # enough memory in cpu for a single batch
-            batched_input_points = [input_points]
-        else:
-            batch_size = 200
-            batched_input_points = torch.split(input_points, batch_size, dim=0)
-
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
@@ -412,12 +413,16 @@ if __name__ == "__main__":
         colors_dict = {'tssa': 'blue',
                        'ossa': 'orange',
                        'aa': 'red',
-                       'apdg': 'green'}
-        foliation.plot(eigenvectors=False)
+                       'apgd': 'green',
+                       'gsa': 'purple'}
+        foliation.plot(eigenvectors=False, transverse=True)
         for name, adversarial_attack in zip(attacks_to_run_str, attacks_to_run):
-            plot_attacks_2D(adversarial_attack, test_points=input_points,budget=0.1, color=colors_dict[name.casefold()])
+            plot_attacks_2D(adversarial_attack, test_points=input_points, budget=0.3, color=colors_dict[name.casefold()])
             # foliation.plot(eigenvectors=False)
             # plt.legend()
+        geodesics = GSA.geodesic(eval_point=input_points, init_velocity=OSSA.compute_attack(input_points, budget=0.3) - input_points, euclidean_budget=0.3, full_path=True)
+        for geodesic in geodesics:
+            plt.plot(geodesic[:, 0].detach().numpy(), geodesic[:, 1].detach().numpy(), ":", color='red')
         savename = f"plot_attacks_2D_budget=1e-1_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + '.pdf', format='pdf')

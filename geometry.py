@@ -1,10 +1,11 @@
 """Module implementing tools to examine the geometry of a model."""
+from sympy import euler
 import torch
 from torch import nn
 from torch.autograd.functional import jacobian, hessian
 from tqdm import tqdm
 from scipy.integrate import solve_ivp
-from torchdiffeq import odeint_event
+from torchdiffeq import odeint, odeint_event
 
 
 class GeometricModel(object):
@@ -12,7 +13,7 @@ class GeometricModel(object):
     def __init__(self,
                  network: nn.Module,
                  network_score: nn.Module,
-                 verbose: bool=True,
+                 verbose: bool=False,
     ) -> None:
 
         super(GeometricModel, self).__init__()
@@ -21,12 +22,13 @@ class GeometricModel(object):
         # self.network.eval()
         self.verbose = verbose
         self.device = next(self.network.parameters()).device
+        self.dtype = next(self.network.parameters()).dtype
 
 
     def proba(
         self,
         eval_point: torch.Tensor,
-    ) -> None:
+    ) -> torch.Tensor:
 
         if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
             eval_point = eval_point.unsqueeze(0)
@@ -37,7 +39,7 @@ class GeometricModel(object):
     def score(
         self,
         eval_point: torch.Tensor,
-    ) -> None:
+    ) -> torch.Tensor:
         
         if len(eval_point.shape) == 3:  # TODO: trouver un truc plus propre
             eval_point = eval_point.unsqueeze(0)
@@ -301,6 +303,7 @@ class GeometricModel(object):
                         J_s, torch.diag_embed(J_p.mT) - pdp - pdp.mT, J_s
                     )
         else:
+            raise NotImplementedError
             def G(x): return self.local_data_matrix(x, create_graph=True)
             if self.verbose:
                 print(f"shape of eval_point = {eval_point.shape}")
@@ -318,40 +321,81 @@ class GeometricModel(object):
     ) -> torch.Tensor:
         J_G = self.jac_metric(eval_point)
         G = self.local_data_matrix(eval_point)
-        G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).float() # input need to be in double
+        G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
 
         return torch.einsum(
                     "...kl, ...ijl -> ...ijk",
                     G_inv, J_G + J_G.permute(0, 2, 1, 3) - J_G.permute(0, 3, 1, 2)
                 ) / 2
 
-    
-
     def geodesic(
         self,
         eval_point: torch.Tensor,
         init_velocity: torch.Tensor,
         euclidean_budget: float=None,
+        full_path: bool=False,
     ) -> torch.Tensor:
+        if len(init_velocity.shape) > 2:
+            init_velocity = init_velocity.flatten(1)
         
         def ode(t, y):
-            x, v = y[0], y[1].flatten(1)
+            x, v = y
             christoffel = self.christoffel(x)
-            return torch.stack((v.reshape(x.shape), torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel).reshape(x.shape)))
+            return (v.reshape(x.shape), torch.einsum("...i, ...j, ...ijk -> ...k", v, v, - christoffel))
         
-        def euclidean_stop(t, y):
-            if euclidean_budget is None:
-                return nn.ReLU(2. - t)
-            x = y[0]
-            return torch.norm(x - eval_point).pow(2) - euclidean_budget
-        
-        euclidean_stop.terminal = True
-        
-        y0 = torch.stack((eval_point, init_velocity)) # TODO: wrong dim after bash -> should be flatten ?
+        if euclidean_budget is None:
+            y0 = (eval_point, init_velocity) # TODO: wrong dim after bash -> should be flatten ?
+
+            solution_ode = odeint(ode, y0, t=torch.linspace(0., 4., 1000), method="rk4")
+            solution_ode_x, solution_ode_v = solution_ode
+
+            return solution_ode_x[-1]
+
+        elif euclidean_budget <= 0.:
+            return eval_point
+
+        else:
+            def euclidean_stop(t, y):
+                x = y[0]
+                return nn.functional.relu(euclidean_budget - torch.norm(x - eval_point, dim=1))
+            if self.verbose:
+                print(f"eval_point: {eval_point.shape}")
+                print(f"init_velocity: {init_velocity.shape}")
+            y0 = (eval_point, init_velocity)
+                
+            # solution_ivp = solve_ivp(ode, t_span = (0, 2), y0=(eval_point.detach().numpy(), init_velocity.detach().numpy()), method='RK23', events=euclidean_stop if euclidean_budget is not None else None)
+
+            # event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 100, method="rk4", options={"step_size": euclidean_budget / 1000})
             
-        # solution_ivp = solve_ivp(ode, t_span = (0, 2), y0=(eval_point.detach().numpy(), init_velocity.detach().numpy()), method='RK23', events=euclidean_stop if euclidean_budget is not None else None)
+            # if self.verbose: print(f"event_t: {event_t}")
 
-        event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 1000)
+            solution_ode = odeint(ode, y0, t=torch.linspace(0., 4., int(100 / euclidean_budget) ), method="rk4")
+            
+            # self.verbose = True
+            solution_ode_x, solution_ode_v = solution_ode
+            if full_path:
+                return solution_ode_x.transpose(0, 1)
+            
+            if self.verbose:
+                print(f"solution_ode_x: {solution_ode_x.shape}")
+                print(f"solution_ode_v: {solution_ode_v.shape}")
+                print(f"0 is initial value ? {torch.allclose(solution_ode_x[0], eval_point)} dist: {torch.dist(solution_ode_x[0], eval_point)}")
 
+            # Get last point exceeding the euclidean budget
+            admissible_indices = ((solution_ode_x - eval_point.unsqueeze(0)).norm(dim=-1) <= euclidean_budget)
+            last_admissible_index = admissible_indices.shape[0] - 1 - admissible_indices.flip(dims=[0]).int().argmax(dim=0)
+            last_admissible_solution_x = torch.diagonal(solution_ode_x[last_admissible_index]).T
+                
+            if self.verbose:
+                last_admissible_solution_x_loop = torch.zeros_like(eval_point)
+                last_admissible_index_loop = torch.zeros(eval_point.shape[0])
 
-        return solution_ode
+                for i, step in enumerate(solution_ode_x):
+                    for j, batch in enumerate(step):
+                        if (batch - eval_point[j]).norm() <= euclidean_budget:
+                            last_admissible_index_loop[j] = i
+                            last_admissible_solution_x_loop[j] = batch
+                print(f"2 solutions are the same ? {torch.allclose(last_admissible_solution_x, last_admissible_solution_x_loop)}")
+                print(f"2 indices of solutions are the same ? {torch.allclose(last_admissible_index.int(), last_admissible_index_loop.int())}")
+                        
+            return last_admissible_solution_x

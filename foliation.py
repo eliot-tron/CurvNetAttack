@@ -24,8 +24,9 @@ class Foliation(GeometricModel):
         :returns: the curve gamma(t) with shape (bs, n, d)
 
         """
+        
         def f(t, y):
-            J = self.jac_proba(torch.tensor(y).float().unsqueeze(0)).squeeze(0).detach()
+            J = self.jac_proba(torch.tensor(y).to(self.device).to(self.dtype).unsqueeze(0)).squeeze(0).detach()
             a, b = J[0]
             if transverse:
                 e = torch.tensor([a, b])
@@ -65,7 +66,7 @@ class Foliation(GeometricModel):
                     leaves = self.compute_leaf(y0, transverse=transverse)
                     plt.plot(leaves[0], leaves[1], ":", color='blue', zorder=1)
                 except ValueError:
-                    J = self.jac_proba(torch.tensor(y0).float().unsqueeze(0)).squeeze(0).detach()
+                    J = self.jac_proba(torch.tensor(y0).to(self.device).to(self.dtype).unsqueeze(0)).squeeze(0).detach()
                     print(f'Failed with {y0} and \njacobian {J}')
                     
                 # print(leaves)

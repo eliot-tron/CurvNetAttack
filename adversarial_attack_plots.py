@@ -194,8 +194,8 @@ def plot_contour_2D(adversarial_attack):
 def plot_curvature_2D(adversarial_attack):
     """Plot the extrinsic curvature for a 2D input manifold and 1D leaves.
     """
-    adversarial_attack.network = adversarial_attack.network.to(torch.double)
-    xs = torch.linspace(0, 1, steps=100).double()
+    adversarial_attack.network = adversarial_attack.network.to(adversarial_attack.device)
+    xs = torch.linspace(0, 1, steps=100).to(adversarial_attack.dtype)
     grid = torch.cartesian_prod(xs, xs)
 
     G_1 = adversarial_attack.local_data_matrix(grid)

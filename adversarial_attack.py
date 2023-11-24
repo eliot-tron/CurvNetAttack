@@ -238,10 +238,11 @@ class AdversarialAutoAttack(AdversarialAttack):
 
         """
         # adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='custom', attacks_to_run=['apgd-ce'], device=self.device, verbose=False)
-        adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='standard', device=self.device, verbose=False)
+        adversary = AutoAttack(self.network_score.float(), norm='L2', eps=budget, version='standard', device=self.device, verbose=False)
         labels = torch.argmax(self.proba(input_sample), dim=-1)
-        x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=250) 
-        return x_adv
+        x_adv = adversary.run_standard_evaluation(input_sample.clone().float(), labels, bs=250) 
+        self.network_score.to(self.dtype) # to avoid messing with other attacks
+        return x_adv.to(self.dtype)
 
 
 class APGDAttack(AdversarialAttack):
@@ -258,10 +259,11 @@ class APGDAttack(AdversarialAttack):
         :returns: attacked point as a torch tensor (bs, d)
 
         """
-        adversary = AutoAttack(self.network_score, norm='L2', eps=budget, version='custom', attacks_to_run=['apgd-ce'], device=self.device, verbose=False)
+        adversary = AutoAttack(self.network_score.float(), norm='L2', eps=budget, version='custom', attacks_to_run=['apgd-ce'], device=self.device, verbose=False)
         labels = torch.argmax(self.proba(input_sample), dim=-1)
-        x_adv = adversary.run_standard_evaluation(input_sample, labels, bs=250) 
-        return x_adv
+        x_adv = adversary.run_standard_evaluation(input_sample.clone().float(), labels, bs=250)
+        self.network_score.to(self.dtype) # to avoid messing with other attacks
+        return x_adv.to(self.dtype)
 
 
 class GeodesicSpectralAttack(AdversarialAttack):
@@ -286,6 +288,11 @@ class GeodesicSpectralAttack(AdversarialAttack):
         else:
             _, v = torch.linalg.eigh(G)  # value, vector, in ascending order
             init_speed = v[..., -1]  # be careful, it isn't intuitive -> RTD
+        norm = torch.linalg.vector_norm(init_speed, ord=2, dim=-1, keepdim=True)
+        init_speed = budget * init_speed / norm
+        init_speed = init_speed.reshape(input_sample.shape)
+        init_speed_sign = self.attack_sign(input_sample, init_speed)
+        init_speed = torch.einsum('z, z... -> z...', init_speed_sign, init_speed)
 
         x_adv = self.geodesic(input_sample, init_speed, budget)
 
