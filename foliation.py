@@ -5,12 +5,41 @@ import torch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from geometry import GeometricModel
-from scipy.linalg import null_space
+# from scipy.linalg import null_space
 from scipy.integrate import solve_ivp
+from torchdiffeq import odeint
 
 
 class Foliation(GeometricModel):
     """Class representing a foliation."""
+
+    def batch_compute_leaf(self, init_points, transverse=False):
+        """Compute the leaf going through the point
+        [init_points] and with distribution the kernel
+        of the FIM induced by the network.
+
+        :init_point: point from the leaf with shape (bs, d)
+        :num_points: number of points to generate on the curve
+        :dt: time interval to solve the PDE system
+        :transverse: If true, compute the transverse foliation
+        :returns: the curve gamma(t) with shape (bs, n, d)
+
+        """
+        
+        def f(t, y):
+            J = self.jac_proba(y)
+            e = J[:,0,:]
+            if not transverse:
+                e = torch.stack(e[:,1], -e[:,0])
+            norm = torch.linalg.vector_norm(e, ord=2, dim=-1, keepdim=True)
+            e = e / norm
+            return e
+
+        leaf = odeint(f, init_points, t=torch.linspace(0, 0.5, 100), method="rk4").transpose(0, 1)
+        leaf_back = odeint(f, init_points, t=-torch.linspace(0, 0.5, 100), method="rk4").transpose(0, 1)
+        
+        return torch.cat((leaf_back.flip(1)[:,:-1], leaf), dim=1)
+        # return leaf
 
     def compute_leaf(self, init_point, transverse=False):
         """Compute the leaf going through the point
@@ -59,15 +88,18 @@ class Foliation(GeometricModel):
         scale = 0.1
         if leaves:
             print("Plotting the leaves...")
-            xs = torch.arange(0, 1.5 + scale, scale)
+            xs = torch.arange(0, 1.5 + scale, scale, dtype=self.dtype, device=self.device)
             initial_coordinates = torch.cartesian_prod(xs, xs)
-            for y0 in tqdm(initial_coordinates):
-                try:
-                    leaves = self.compute_leaf(y0, transverse=transverse)
-                    plt.plot(leaves[0], leaves[1], ":", color='blue', zorder=1)
-                except ValueError:
-                    J = self.jac_proba(torch.tensor(y0).to(self.device).to(self.dtype).unsqueeze(0)).squeeze(0).detach()
-                    print(f'Failed with {y0} and \njacobian {J}')
+            leaves = self.batch_compute_leaf(initial_coordinates, transverse=transverse)
+            for leaf in tqdm(leaves):
+                plt.plot(leaf[:, 0], leaf[:, 1], ",", color='blue', zorder=1)
+            # for y0 in tqdm(initial_coordinates):
+            #     try:
+            #         leaves = self.compute_leaf(y0, transverse=transverse)
+            #         plt.plot(leaves[0], leaves[1], ":", color='blue', zorder=1)
+            #     except ValueError:
+            #         J = self.jac_proba(torch.tensor(y0).to(self.device).to(self.dtype).unsqueeze(0)).squeeze(0).detach()
+            #         print(f'Failed with {y0} and \njacobian {J}')
                     
                 # print(leaves)
                 # print(f'leaves shape: {leaves.shape}')
