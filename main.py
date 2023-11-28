@@ -422,7 +422,7 @@ if __name__ == "__main__":
             # plt.legend()
         geodesics = GSA.geodesic(eval_point=input_points, init_velocity=OSSA.compute_attack(input_points, budget=0.3) - input_points, euclidean_budget=0.3, full_path=True)
         for geodesic in geodesics:
-            plt.plot(geodesic[:, 0].detach().numpy(), geodesic[:, 1].detach().numpy(), ":", color='red')
+            plt.plot(geodesic[:, 0].detach().numpy(), geodesic[:, 1].detach().numpy(), ",", color='red')
         savename = f"plot_attacks_2D_budget=1e-1_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + '.pdf', format='pdf')

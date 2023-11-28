@@ -1,10 +1,9 @@
 """Module implementing tools to examine the geometry of a model."""
-from sympy import euler
 import torch
 from torch import nn
 from torch.autograd.functional import jacobian, hessian
 from tqdm import tqdm
-from scipy.integrate import solve_ivp
+# from scipy.integrate import solve_ivp
 from torchdiffeq import odeint, odeint_event
 
 
@@ -160,7 +159,8 @@ class GeometricModel(object):
     def local_data_matrix(
         self,
         eval_point: torch.Tensor,
-        create_graph: bool=False
+        create_graph: bool=False,
+        regularisation: bool=True
     ) -> torch.Tensor:
         """Function computing the Fisher metric wrt the input of the network. 
 
@@ -179,7 +179,15 @@ class GeometricModel(object):
         P = torch.diag_embed(p, dim1=1)
         pp = torch.einsum("zi,zj -> zij", p, p)
         
-        return torch.einsum("zji, zjk, zkl -> zil", J_s, (P - pp), J_s)
+        G = torch.einsum("zji, zjk, zkl -> zil", J_s, (P - pp), J_s)
+        
+        if not regularisation:
+            return G
+
+        eps = torch.linalg.eigh(G)[0].mean(dim=-1)
+        epsI = torch.einsum("z, ij -> zij", eps, torch.eye(G.shape[-1]))
+        
+        return G + epsI
     
 
     def hessian_gradproba(
@@ -290,7 +298,7 @@ class GeometricModel(object):
     def jac_metric(
         self,
         eval_point: torch.Tensor,
-        relu_optim: bool=True,  # Else intractable
+        relu_optim: bool=False,  # Else intractable
     ) -> torch.Tensor:
 
         if relu_optim:
@@ -303,7 +311,8 @@ class GeometricModel(object):
                         J_s, torch.diag_embed(J_p.mT) - pdp - pdp.mT, J_s
                     )
         else:
-            raise NotImplementedError
+            # raise NotImplementedError
+            # self.verbose=True
             def G(x): return self.local_data_matrix(x, create_graph=True)
             if self.verbose:
                 print(f"shape of eval_point = {eval_point.shape}")
@@ -312,6 +321,7 @@ class GeometricModel(object):
             if self.verbose: print(f"shape of j before reshape = {jac_metric.shape}")
             jac_metric = jac_metric.sum(3).flatten(3)  #TODO: to finish indices
             if self.verbose: print(f"shape of j after reshape = {jac_metric.shape}")
+            # self.verbose=False
             return jac_metric
 
 
@@ -322,6 +332,7 @@ class GeometricModel(object):
         J_G = self.jac_metric(eval_point)
         G = self.local_data_matrix(eval_point)
         G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
+        # TODO garde fou pour quand G devient nulle, ou que G_inv diverge
 
         return torch.einsum(
                     "...kl, ...ijl -> ...ijk",
@@ -341,7 +352,7 @@ class GeometricModel(object):
         def ode(t, y):
             x, v = y
             christoffel = self.christoffel(x)
-            return (v.reshape(x.shape), torch.einsum("...i, ...j, ...ijk -> ...k", v, v, - christoffel))
+            return (v.reshape(x.shape), -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel))
         
         if euclidean_budget is None:
             y0 = (eval_point, init_velocity) # TODO: wrong dim after bash -> should be flatten ?
