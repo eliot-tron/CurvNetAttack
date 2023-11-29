@@ -160,7 +160,7 @@ class GeometricModel(object):
         self,
         eval_point: torch.Tensor,
         create_graph: bool=False,
-        regularisation: bool=True
+        regularisation: bool=False,
     ) -> torch.Tensor:
         """Function computing the Fisher metric wrt the input of the network. 
 
@@ -338,6 +338,29 @@ class GeometricModel(object):
                     "...kl, ...ijl -> ...ijk",
                     G_inv, J_G + J_G.permute(0, 2, 1, 3) - J_G.permute(0, 3, 1, 2)
                 ) / 2
+    
+    def project_kernel(
+        self,
+        eval_point: torch.Tensor,
+        direction: torch.Tensor,
+    ) -> torch.Tensor:
+        J = self.jac_proba(eval_point)
+        J_T = J.mT
+        kernel_basis = torch.qr(J_T, some=False).Q[:, J_T.shape[1] - 1:]  # we extract the last component since the sum of the column of J_T is equal to zero -> kinda wrong 
+        coefficients = torch.linalg.lstsq(kernel_basis, direction).solution
+        displacement = torch.mv(kernel_basis, coefficients)
+        return displacement
+        
+    def project_transverse(
+        self,
+        eval_point: torch.Tensor,
+        direction: torch.Tensor,
+    ) -> torch.Tensor:
+        J = self.jac_proba(eval_point)
+        J_T = J.mT
+        coefficients = torch.linalg.lstsq(J_T, direction).solution
+        displacement = torch.einsum("zla, za -> zl", J_T, coefficients)
+        return displacement
 
     def geodesic(
         self,
@@ -352,7 +375,9 @@ class GeometricModel(object):
         def ode(t, y):
             x, v = y
             christoffel = self.christoffel(x)
-            return (v.reshape(x.shape), -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel))
+            a = -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel)
+            v = self.project_transverse(x, v)
+            return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
             y0 = (eval_point, init_velocity) # TODO: wrong dim after bash -> should be flatten ?
