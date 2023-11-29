@@ -184,10 +184,15 @@ class GeometricModel(object):
         if not regularisation:
             return G
 
-        eps = torch.linalg.eigh(G)[0].mean(dim=-1)
+        C = p.shape[-1]
+        eigenvalues, eigenvectors = torch.linalg.eigh(G)
+        eps = eigenvalues[..., - (C - 1)] / 2
+
         epsI = torch.einsum("z, ij -> zij", eps, torch.eye(G.shape[-1]))
+        epsI[..., - (C - 1):] = 0
+        epsKernel = torch.einsum("zij, zjk, zlk -> zil", eigenvectors, epsI, eigenvectors)
         
-        return G + epsI
+        return G + epsKernel
     
 
     def hessian_gradproba(
@@ -346,7 +351,7 @@ class GeometricModel(object):
     ) -> torch.Tensor:
         J = self.jac_proba(eval_point)
         J_T = J.mT
-        kernel_basis = torch.qr(J_T, some=False).Q[:, J_T.shape[1] - 1:]  # we extract the last component since the sum of the column of J_T is equal to zero -> kinda wrong 
+        kernel_basis = torch.qr(J_T, some=False).Q[:, J_T.shape[1] - 1:]  # we extract the last component since the sum of the column of J_T is equal to zero -> this is only the basis of the kernel of J_T 
         coefficients = torch.linalg.lstsq(kernel_basis, direction).solution
         displacement = torch.mv(kernel_basis, coefficients)
         return displacement
@@ -376,7 +381,7 @@ class GeometricModel(object):
             x, v = y
             christoffel = self.christoffel(x)
             a = -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel)
-            v = self.project_transverse(x, v)
+            # v = self.project_transverse(x, v)
             return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
