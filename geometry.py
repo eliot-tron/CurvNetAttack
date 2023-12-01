@@ -336,13 +336,17 @@ class GeometricModel(object):
     ) -> torch.Tensor:
         J_G = self.jac_metric(eval_point)
         G = self.local_data_matrix(eval_point)
-        G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
+        B = J_G + J_G.permute(0, 3, 2, 1) - J_G.permute(0, 2, 1, 3)
+        # G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
         # TODO garde fou pour quand G devient nulle, ou que G_inv diverge
-
-        return torch.einsum(
-                    "...kl, ...ijl -> ...ijk",
-                    G_inv, J_G + J_G.permute(0, 2, 1, 3) - J_G.permute(0, 3, 1, 2)
-                ) / 2
+        result_lstsq = torch.linalg.lstsq(G.unsqueeze(-3).expand((*G.shape[:-2], B.shape[-3], *G.shape[-2:])), B, rcond=1e-7)
+        result_lstsq = result_lstsq.solution / 2
+        # G shape: (bs, l, k) | B shape: (bs, i, l, j)
+        result_lstsq = result_lstsq.mT # lstsq gives (bs, i, k, j) and we want (bs, i, j, k)
+        # B_expanded = B.unsqueeze(-1).expand((*B.shape, G.shape[-2])).transpose(-1, -2)
+        # result_lstsq = torch.linalg.lstsq(G[...,None, None, :, :].expand(B_expanded.shape), B_expanded).solution / 2
+        # result_pinv = torch.einsum("...kl, ...ilj -> ...ijk", G_inv, B) / 2
+        return result_lstsq
     
     def project_kernel(
         self,
@@ -381,7 +385,7 @@ class GeometricModel(object):
             x, v = y
             christoffel = self.christoffel(x)
             a = -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel)
-            # v = self.project_transverse(x, v)
+            v = self.project_transverse(x, v)
             return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
