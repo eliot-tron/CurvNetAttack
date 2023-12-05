@@ -295,5 +295,6 @@ class GeodesicSpectralAttack(AdversarialAttack):
         init_speed = torch.einsum('z, z... -> z...', init_speed_sign, init_speed)
 
         x_adv = self.geodesic(input_sample, init_speed, budget)
+        x_adv = input_sample + budget * torch.nn.functional.normalize((x_adv - input_sample).flatten(1), dim=1).reshape(x_adv.shape)
 
         return x_adv

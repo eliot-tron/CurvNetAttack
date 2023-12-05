@@ -303,16 +303,27 @@ class GeometricModel(object):
     def jac_metric(
         self,
         eval_point: torch.Tensor,
-        relu_optim: bool=False,  # Else intractable
+        relu_optim: bool=True,  # Else intractable
     ) -> torch.Tensor:
+        """Function computing ∂_k G_{i,j}.
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+            relu_optim (Boolean): Optimization of the computation if using
+            only ReLU in the model.
+
+        Returns:
+            torch.Tensor: Tensor ∂_k G_{i,j} with dimensions (bs, i, j, k).
+        """
 
         if relu_optim:
             J_s = self.jac_score(eval_point)
             J_p = self.jac_proba(eval_point)
             p = self.proba(eval_point)
-            pdp = torch.einsum("...a, ...bi -> ...iab", p, J_p)  # p_a ∂_i p_b
+            pdp = torch.einsum("...a, ...bk -> ...kab", p, J_p)  # p_a ∂_k p_b
             return torch.einsum(
-                        "...ak, ...iab, ...bl -> ...ikl",
+                        "...ai, ...kab, ...bj -> ...ijk",
                         J_s, torch.diag_embed(J_p.mT) - pdp - pdp.mT, J_s
                     )
         else:
@@ -324,7 +335,7 @@ class GeometricModel(object):
                 print(f"shape of output = {self.proba(eval_point).shape}")
             jac_metric = jacobian(G, eval_point)
             if self.verbose: print(f"shape of j before reshape = {jac_metric.shape}")
-            jac_metric = jac_metric.sum(3).flatten(3)  #TODO: to finish indices
+            jac_metric = jac_metric.sum(3).flatten(3)  # Before reshape: (bs, i, j, bs_, k)  ∂_k G_{i,j}
             if self.verbose: print(f"shape of j after reshape = {jac_metric.shape}")
             # self.verbose=False
             return jac_metric
@@ -334,9 +345,18 @@ class GeometricModel(object):
         self,
         eval_point: torch.Tensor,
     ) -> torch.Tensor:
+        """Function computing Γ_{i,j}^k.
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+
+        Returns:
+            torch.Tensor: Tensor Γ_{i,j}^k with dimensions (bs, i, j, k).
+        """
         J_G = self.jac_metric(eval_point)
         G = self.local_data_matrix(eval_point)
-        B = J_G + J_G.permute(0, 3, 2, 1) - J_G.permute(0, 2, 1, 3)
+        B = J_G.permute(0, 3, 1, 2) + J_G.permute(0, 1, 3, 2) - J_G.permute(0, 3, 2, 1)
         # G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
         # TODO garde fou pour quand G devient nulle, ou que G_inv diverge
         result_lstsq = torch.linalg.lstsq(G.unsqueeze(-3).expand((*G.shape[:-2], B.shape[-3], *G.shape[-2:])), B, rcond=1e-7)
@@ -377,7 +397,21 @@ class GeometricModel(object):
         init_velocity: torch.Tensor,
         euclidean_budget: float=None,
         full_path: bool=False,
+        project_leaf: bool=True,
     ) -> torch.Tensor:
+        """Compute the geodesic for the FIM's LC connection with initial velocities [init_velocity] at points [eval_point].
+
+        Args:
+            eval_point (torch.Tensor): Batch of points of the input space at
+            which the expression is evaluated.
+            init_velocity (torch.Tensor): Batch of initial velocities for the geodesic.
+            euclidean_budget (float, optional): Euclidean budget for the point. Defaults to None.
+            full_path (bool, optional): When True, returns the full geodesic path. Defaults to False.
+            project_leaf (bool, optional): When True, projects the velocity to the transverse leaf at each step. Defaults to True.
+
+        Returns:
+            torch.Tensor: Arrival point of the geodesic with dimensions (bs, i)
+        """
         if len(init_velocity.shape) > 2:
             init_velocity = init_velocity.flatten(1)
         
@@ -385,7 +419,9 @@ class GeometricModel(object):
             x, v = y
             christoffel = self.christoffel(x)
             a = -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel)
-            v = self.project_transverse(x, v)
+            if project_leaf:
+                v = self.project_transverse(x, v)
+                # a = self.project_transverse(x, a)
             return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
@@ -402,7 +438,7 @@ class GeometricModel(object):
         else:
             def euclidean_stop(t, y):
                 x = y[0]
-                return nn.functional.relu(euclidean_budget - torch.norm(x - eval_point, dim=1))
+                return nn.functional.relu(euclidean_budget - torch.norm(x - eval_point, dim=1)).sum()
             if self.verbose:
                 print(f"eval_point: {eval_point.shape}")
                 print(f"init_velocity: {init_velocity.shape}")
@@ -410,7 +446,7 @@ class GeometricModel(object):
                 
             # solution_ivp = solve_ivp(ode, t_span = (0, 2), y0=(eval_point.detach().numpy(), init_velocity.detach().numpy()), method='RK23', events=euclidean_stop if euclidean_budget is not None else None)
 
-            # event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 100, method="rk4", options={"step_size": euclidean_budget / 1000})
+            # event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 100, method="rk4", options={"step_size": euclidean_budget / 100})
             
             # if self.verbose: print(f"event_t: {event_t}")
 
@@ -420,6 +456,8 @@ class GeometricModel(object):
             solution_ode_x, solution_ode_v = solution_ode
             if full_path:
                 return solution_ode_x.transpose(0, 1)
+
+            # return solution_ode_x[-1]
             
             if self.verbose:
                 print(f"solution_ode_x: {solution_ode_x.shape}")
@@ -430,6 +468,7 @@ class GeometricModel(object):
             admissible_indices = ((solution_ode_x - eval_point.unsqueeze(0)).norm(dim=-1) <= euclidean_budget)
             last_admissible_index = admissible_indices.shape[0] - 1 - admissible_indices.flip(dims=[0]).int().argmax(dim=0)
             last_admissible_solution_x = torch.diagonal(solution_ode_x[last_admissible_index]).T
+            print(f"Warning: geodesics stoped before reaching ɛ: {(last_admissible_index == admissible_indices.shape[0] -1).float().mean() * 100:.2f}%")
                 
             if self.verbose:
                 last_admissible_solution_x_loop = torch.zeros_like(eval_point)
