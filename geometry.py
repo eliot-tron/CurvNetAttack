@@ -412,6 +412,7 @@ class GeometricModel(object):
         Returns:
             torch.Tensor: Arrival point of the geodesic with dimensions (bs, i)
         """
+        print(f"ɛ={euclidean_budget}")
         if len(init_velocity.shape) > 2:
             init_velocity = init_velocity.flatten(1)
         
@@ -450,7 +451,7 @@ class GeometricModel(object):
             
             # if self.verbose: print(f"event_t: {event_t}")
 
-            solution_ode = odeint(ode, y0, t=torch.linspace(0., 4., int(100 / euclidean_budget) ), method="rk4")
+            solution_ode = odeint(ode, y0, t=torch.linspace(0., int(euclidean_budget * 10), 1000), method="rk4", options={"step_size": euclidean_budget})
             
             # self.verbose = True
             solution_ode_x, solution_ode_v = solution_ode
@@ -465,9 +466,9 @@ class GeometricModel(object):
                 print(f"0 is initial value ? {torch.allclose(solution_ode_x[0], eval_point)} dist: {torch.dist(solution_ode_x[0], eval_point)}")
 
             # Get last point exceeding the euclidean budget
-            admissible_indices = ((solution_ode_x - eval_point.unsqueeze(0)).norm(dim=-1) <= euclidean_budget)
+            admissible_indices = ((solution_ode_x - eval_point.unsqueeze(0)).flatten(2).norm(dim=-1) <= euclidean_budget)
             last_admissible_index = admissible_indices.shape[0] - 1 - admissible_indices.flip(dims=[0]).int().argmax(dim=0)
-            last_admissible_solution_x = torch.diagonal(solution_ode_x[last_admissible_index]).T
+            last_admissible_solution_x = torch.diagonal(solution_ode_x[last_admissible_index], dim1=0, dim2=1).movedim(-1, 0)
             print(f"Warning: geodesics stoped before reaching ɛ: {(last_admissible_index == admissible_indices.shape[0] -1).float().mean() * 100:.2f}%")
                 
             if self.verbose:

@@ -155,7 +155,7 @@ if __name__ == "__main__":
     if "GSA" in attacks_to_run_str:
         MAX_BUDGET = 1
         STEP_BUDGET = 0.2
-        batch_size = 2
+        batch_size = 1
 
     
     if task in ["plot-curvature", "plot-contour"] and dataset_name[:3] != 'XOR':
