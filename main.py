@@ -300,10 +300,10 @@ if __name__ == "__main__":
         print("Loading precomputed attacks", end='')
         for attack_path in attack_paths:
             print(".", end='')
-            br, ip, av = torch.load(attack_path, map_location=device, dtype=precision_type)
-            budget_range_list.append(br)
-            input_points_list.append(ip)
-            attack_vectors.append(av)
+            br, ip, av = torch.load(attack_path, map_location=device)
+            budget_range_list.append(br.to(precision_type))
+            input_points_list.append(ip.to(precision_type))
+            attack_vectors.append([a.to(precision_type) for a in av])
         budget_range = budget_range_list[0]
         input_points = input_points_list[0]
         print("done")
