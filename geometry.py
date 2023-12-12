@@ -1,4 +1,5 @@
 """Module implementing tools to examine the geometry of a model."""
+import sys
 import torch
 from torch import nn
 from torch.autograd.functional import jacobian, hessian
@@ -359,10 +360,14 @@ class GeometricModel(object):
         B = J_G.permute(0, 3, 1, 2) + J_G.permute(0, 1, 3, 2) - J_G.permute(0, 3, 2, 1)
         # G_inv = torch.linalg.pinv(G.to(torch.double), hermitian=True).to(self.dtype) # input need to be in double
         # TODO garde fou pour quand G devient nulle, ou que G_inv diverge
-        result_lstsq = torch.linalg.lstsq(G.unsqueeze(-3).expand((*G.shape[:-2], B.shape[-3], *G.shape[-2:])), B, rcond=1e-7)
-        result_lstsq = result_lstsq.solution / 2
-        # G shape: (bs, l, k) | B shape: (bs, i, l, j)
-        result_lstsq = result_lstsq.mT # lstsq gives (bs, i, k, j) and we want (bs, i, j, k)
+        try:
+            # G shape: (bs, l, k) | B shape: (bs, i, l, j)
+            result_lstsq = torch.linalg.lstsq(G.unsqueeze(-3).expand((*G.shape[:-2], B.shape[-3], *G.shape[-2:])), B, rcond=1e-7)
+            result_lstsq = result_lstsq.solution / 2
+            result_lstsq = result_lstsq.mT # lstsq gives (bs, i, k, j) and we want (bs, i, j, k)
+        except:
+            print("Warning: lstsq in project_transverse raised an error.")
+            result_lstsq = torch.zeros_like(J_G)
         # B_expanded = B.unsqueeze(-1).expand((*B.shape, G.shape[-2])).transpose(-1, -2)
         # result_lstsq = torch.linalg.lstsq(G[...,None, None, :, :].expand(B_expanded.shape), B_expanded).solution / 2
         # result_pinv = torch.einsum("...kl, ...ilj -> ...ijk", G_inv, B) / 2
@@ -387,8 +392,12 @@ class GeometricModel(object):
     ) -> torch.Tensor:
         J = self.jac_proba(eval_point)
         J_T = J.mT
-        coefficients = torch.linalg.lstsq(J_T, direction).solution
-        displacement = torch.einsum("zla, za -> zl", J_T, coefficients)
+        try:
+            coefficients = torch.linalg.lstsq(J_T, direction).solution
+            displacement = torch.einsum("zla, za -> zl", J_T, coefficients)
+        except:
+            print("Warning: lstsq in project_transverse raised an error.")
+            displacement = direction
         return displacement
 
     def geodesic(
@@ -420,12 +429,19 @@ class GeometricModel(object):
             x, v = y
             christoffel = self.christoffel(x)
             a = -torch.einsum("...i, ...j, ...ijk -> ...k", v, v, christoffel)
+            # print(f"|v|={v.norm()}", end='\r')
             if project_leaf:
                 v = self.project_transverse(x, v)
                 # a = self.project_transverse(x, a)
+            # sys.stdout.write("\033[K") 
+            # if self.verbose:
+            self.iteration += 1
+            # print("\033[K", end='\r')
+            # print(f"iteration n°{self.iteration}: |v|={v.norm():4e}, |a|={a.norm():4e}", end='\r')
             return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
+            raise NotImplemented
             y0 = (eval_point, init_velocity) # TODO: wrong dim after bash -> should be flatten ?
 
             solution_ode = odeint(ode, y0, t=torch.linspace(0., 4., 1000), method="rk4")
@@ -437,21 +453,37 @@ class GeometricModel(object):
             return eval_point
 
         else:
-            def euclidean_stop(t, y):
-                x = y[0]
-                return nn.functional.relu(euclidean_budget - torch.norm(x - eval_point, dim=1)).sum()
+            self.iteration = 0 
             if self.verbose:
                 print(f"eval_point: {eval_point.shape}")
                 print(f"init_velocity: {init_velocity.shape}")
-            y0 = (eval_point, init_velocity)
+
+            if not full_path:
+                print("Geodesic computation starting...")
+                solution_ode_x, solution_ode_v = [], []
+                for point, vel in tqdm(zip(eval_point, init_velocity)):
+                    self.iteration = 0
+                    y0 = (point.unsqueeze(0), vel.unsqueeze(0))
+                    def euclidean_stop(t, y):
+                        x, v = y
+                        # print("\033[K", end='\r')
+                        # print(f"Iteration n°{self.iteration} - Euclidean norm: {float(euclidean_budget - torch.norm(x - y0[0])):3e}", end='\r')
+                        return nn.functional.relu(euclidean_budget - torch.norm(x - y0[0])) * (v.norm() > 1e-7).float()
+                    with torch.no_grad():
+                        event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, method="rk4", options={"step_size": euclidean_budget / 10})
+                    solution_ode_x.append(solution_ode[0])
+                    solution_ode_v.append(solution_ode[1])
+                
+                solution_ode_x = torch.cat(solution_ode_x, dim=1)
+                solution_ode_v = torch.cat(solution_ode_v, dim=1)
+                
+                return solution_ode_x[-1]
                 
             # solution_ivp = solve_ivp(ode, t_span = (0, 2), y0=(eval_point.detach().numpy(), init_velocity.detach().numpy()), method='RK23', events=euclidean_stop if euclidean_budget is not None else None)
-
-            # event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, atol=euclidean_budget / 100, method="rk4", options={"step_size": euclidean_budget / 100})
             
             # if self.verbose: print(f"event_t: {event_t}")
 
-            solution_ode = odeint(ode, y0, t=torch.linspace(0., int(euclidean_budget * 10), 1000), method="rk4", options={"step_size": euclidean_budget})
+            solution_ode = odeint(ode, y0, t=torch.linspace(0., int(euclidean_budget * 10), 1000), method="rk4", options={"step_size": euclidean_budget / 100})
             
             # self.verbose = True
             solution_ode_x, solution_ode_v = solution_ode

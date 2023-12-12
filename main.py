@@ -155,7 +155,7 @@ if __name__ == "__main__":
     if "GSA" in attacks_to_run_str:
         MAX_BUDGET = 1
         STEP_BUDGET = 0.2
-        batch_size = 1
+        # batch_size = 1
 
     
     if task in ["plot-curvature", "plot-contour"] and dataset_name[:3] != 'XOR':
@@ -420,9 +420,9 @@ if __name__ == "__main__":
             plot_attacks_2D(adversarial_attack, test_points=input_points, budget=0.3, color=colors_dict[name.casefold()])
             # foliation.plot(eigenvectors=False)
             # plt.legend()
-        geodesics = GSA.geodesic(eval_point=input_points, init_velocity=OSSA.compute_attack(input_points, budget=0.3) - input_points, euclidean_budget=0.3, full_path=True)
-        for geodesic in geodesics:
-            plt.plot(geodesic[:, 0].detach().numpy(), geodesic[:, 1].detach().numpy(), ",", color='red')
+        # geodesics = GSA.geodesic(eval_point=input_points, init_velocity=OSSA.compute_attack(input_points, budget=0.3) - input_points, euclidean_budget=0.3, full_path=True)
+        # for geodesic in geodesics:
+            # plt.plot(geodesic[:, 0].detach().numpy(), geodesic[:, 1].detach().numpy(), ",", color='red')
         savename = f"plot_attacks_2D_budget=1e-1_nsample={num_samples}_nl={non_linearity}"
         savepath = savedirectory + ("" if savedirectory[-1] == "/" else "/") + savename
         plt.savefig(savepath + '.pdf', format='pdf')
