@@ -59,7 +59,7 @@ def compare_inf_norm(
     budget_range: Union[torch.Tensor, Tuple[float, float]]=(1., 1e-2),
     savepath: str="./output/infinity_norm_compared",
     attack_vectors: list[list[torch.Tensor]]=None,
-    plot_inf_chart: bool=False,
+    plot_inf_chart: bool=True,
     restrict_to_class: int=None,
     ) -> None:
     """Save the plot of the infinity norm with respect to the euclidean budget.
@@ -90,7 +90,7 @@ def compare_inf_norm(
             attack_vectors.append([attack.compute_attack(test_points, budget) - test_points for budget in tqdm(budget_range)])
     
     for attack, attack_vec in zip(adversarial_attacks, attack_vectors):
-        for budget_idx in range(0, len(budget_range), 10):
+        for budget_idx in range(0, len(budget_range), 2):
             infty_norms = torch.linalg.vector_norm(attack_vec[budget_idx].reshape(attack_vec[budget_idx].shape[0], -1), ord=float('inf'), dim=1)
             if restrict_to_class is not None:
                 not_class = torch.where(attack.proba(test_points).argmax(dim=1) != restrict_to_class)
@@ -107,14 +107,16 @@ def compare_inf_norm(
             class_attack_vec = torch.argmax(proba_attack_vec)
             proba_attacked_point = attack.proba(test_point_2plot + attack_vec_2plot).squeeze(0)
             class_attacked_point = torch.argmax(proba_attacked_point)
+            vmax = (attack_vec_2plot + test_point_2plot).max()
+            vmin = (attack_vec_2plot + test_point_2plot).min()
             
-            im0 = axes[0].matshow(test_point_2plot.squeeze(0).detach(), vmax=3.5, vmin=-1)
+            im0 = axes[0].matshow(test_point_2plot.squeeze(0).moveaxis(0, -1).detach(), vmax=vmax, vmin=vmin)
             axes[0].set_title(f"Test point\nPredicted class: {class_test_point}\n Confidence: {proba_test_point[class_test_point]*100:.1f}%")
             colorbar(im0)
-            im1 = axes[1].matshow(attack_vec_2plot.squeeze(0).detach())
+            im1 = axes[1].matshow(attack_vec_2plot.squeeze(0).moveaxis(0, -1).detach())
             axes[1].set_title(f"Attack vector\nPredicted class: {class_attack_vec}\n Confidence: {proba_attack_vec[class_attack_vec]*100:.1f}%")
             colorbar(im1)
-            im2 = axes[2].matshow((attack_vec_2plot + test_point_2plot).squeeze(0).detach(), vmax=3.5, vmin=-1)
+            im2 = axes[2].matshow((attack_vec_2plot + test_point_2plot).squeeze(0).moveaxis(0, -1).detach(), vmax=vmax, vmin=vmin)
             axes[2].set_title(f"Attacked point\nPredicted class: {class_attacked_point}\n Confidence: {proba_attacked_point[class_attacked_point]*100:.1f}%")
             colorbar(im2)
             [ax.set_axis_off() for ax in axes.ravel()]

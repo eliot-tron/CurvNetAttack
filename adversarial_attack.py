@@ -84,7 +84,6 @@ class AdversarialAttack(GeometricModel):
         attack_vectors = [self.compute_attack(test_points, budget).detach() - test_points for budget in tqdm(budget_range)]
         torch.save((budget_range, test_points, attack_vectors), savepath + f'_{type(self).__name__}_budget-points-attack.pt')
         del attack_vectors
-    
 
 class TwoStepSpectralAttack(AdversarialAttack):
     """Class to compute the two-step spectral attack in

@@ -183,7 +183,7 @@ if __name__ == "__main__":
         )
     elif dataset_name == 'CIFAR10':
         if non_linearity == 'Sigmoid':
-            raise NotImplemented
+            raise NotImplementedError
             checkpoint_path = './checkpoint/VGG11-lr=0.1/cifar10_medium_cnn_30_Sigmoid.pt'
             non_linearity = nn.Sigmoid()
         elif non_linearity == 'ReLU':
@@ -373,12 +373,13 @@ if __name__ == "__main__":
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
             for adversarial_attack in attacks_to_run:
-                adversarial_attack.save_attack(
-                    test_points=batch,
-                    budget_step=STEP_BUDGET,
-                    budget_max=MAX_BUDGET,
-                    savepath=savepath + f"_batch={batch_index}"
-                )
+                with torch.no_grad():
+                    adversarial_attack.save_attack(
+                        test_points=batch,
+                        budget_step=STEP_BUDGET,
+                        budget_max=MAX_BUDGET,
+                        savepath=savepath + f"_batch={batch_index}"
+                    )
             torch.cuda.empty_cache()
     
     if task == "fooling-rates":
@@ -401,13 +402,14 @@ if __name__ == "__main__":
 
         for batch_index, batch in enumerate(batched_input_points):
             print(f"Batch number {batch_index} starting...")
-            compare_inf_norm(
-                attacks_to_run,
-                batch,
-                budget_range=budget_range,
-                savepath=savepath,
-                attack_vectors=attack_vectors
-            )
+            with torch.no_grad():
+                compare_inf_norm(
+                    attacks_to_run,
+                    batch,
+                    budget_range=budget_range,
+                    savepath=savepath,
+                    attack_vectors=attack_vectors
+                )
 
     if task == "plot-attacks-2D":
         colors_dict = {'tssa': 'blue',

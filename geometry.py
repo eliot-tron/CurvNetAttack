@@ -275,7 +275,7 @@ class GeometricModel(object):
         if approximation:
             J_x = self.jac_proba(eval_point)
             new_point = eval_point.unsqueeze() + J_x
-            NotImplemented
+            raise NotImplementedError
         
         H_grad = self.hessian_gradproba(eval_point)
         
@@ -441,7 +441,7 @@ class GeometricModel(object):
             return (v.reshape(x.shape), a)
         
         if euclidean_budget is None:
-            raise NotImplemented
+            raise NotImplementedError
             y0 = (eval_point, init_velocity) # TODO: wrong dim after bash -> should be flatten ?
 
             solution_ode = odeint(ode, y0, t=torch.linspace(0., 4., 1000), method="rk4")
@@ -470,7 +470,8 @@ class GeometricModel(object):
                         # print(f"Iteration n°{self.iteration} - Euclidean norm: {float(euclidean_budget - torch.norm(x - y0[0])):3e}", end='\r')
                         return nn.functional.relu(euclidean_budget - torch.norm(x - y0[0])) * (v.norm() > 1e-7).float()
                     with torch.no_grad():
-                        event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, method="rk4", options={"step_size": euclidean_budget / 10})
+                        event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, method="euler", options={"step_size": euclidean_budget / 10})
+                        # event_t, solution_ode = odeint_event(ode, y0, t0=torch.tensor(0.), event_fn=euclidean_stop, method="adaptive_heun") # too long
                     solution_ode_x.append(solution_ode[0])
                     solution_ode_v.append(solution_ode[1])
                 
