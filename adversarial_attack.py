@@ -220,8 +220,6 @@ class OneStepSpectralAttack(AdversarialAttack):
         torch.save((budget_range, test_points, attack_vectors), savepath + f'_{type(self).__name__}_budget-points-attack.pt')
         del attack_vectors
 
-        
-
 class AdversarialAutoAttack(AdversarialAttack):
     """Auto Attack designed by ... with the AutoAttack Package
 
